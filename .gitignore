@@ -19,3 +19,5 @@ build
 /JavaConfigurator/build/
 /JavaConfigurator/dist/
 /Release/
+
+.cortex-debug*

@@ -8,6 +8,7 @@
 #ifndef CONFIG_H_
 #define CONFIG_H_
 #include "stdint.h"
+#define DISPLAY_TYPE_AUREUS (1<<6)
 #define DISPLAY_TYPE_EBiCS (1<<5)                  // King-Meter 618U protocol (KM5s, EBS-LCD2, J-LCD, SW-LCD)
 #define DISPLAY_TYPE_KINGMETER_618U (1<<3)                  // King-Meter 618U protocol (KM5s, EBS-LCD2, J-LCD, SW-LCD)
 #define DISPLAY_TYPE_KINGMETER_901U (1<<4)                  // King-Meter 901U protocol (KM5s)
@@ -54,7 +55,7 @@
 #define FRAC_LOW 15
 //#define TS_MODE
 //#define TQONAD1
-#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
+#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
 #define REVERSE 1
 #define PUSHASSIST_CURRENT 30
 #define VOLTAGE_MIN 300

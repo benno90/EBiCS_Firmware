@@ -1,0 +1,17 @@
+{
+    "configurations": [
+        {
+            "name": "bluepill",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": ["USE_HAL_DRIVER", "STM32F103x6", "ARM_MATH_CM3"],
+            "compilerPath": "/home/benno/Programs/STM32/gcc-arm-none-eabi/bin/arm-none-eabi-gcc",
+            "compilerArgs": ["-mcpu=cortex-m3", "-mthumb"],
+            "cStandard": "gnu17",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "linux-gcc-arm"
+        }
+    ],
+    "version": 4
+}

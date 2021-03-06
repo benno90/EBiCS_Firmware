@@ -60,6 +60,10 @@
   #include "display_kingmeter.h"
 #endif
 
+#if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
+  #include "display_aureus.h"
+#endif
+
 #if (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
   #include "display_bafang.h"
 #endif
@@ -194,6 +198,10 @@ uint16_t VirtAddVarTab[NB_OF_VAR] = {0x01, 0x02, 0x03};
 //variables for display communication
 #if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
 KINGMETER_t KM;
+#endif
+
+#if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
+DISPLAY_AUREUS_t DA;
 #endif
 
 //variables for display communication
@@ -414,7 +422,9 @@ int main(void)
               Error_Handler();
             }
 
-
+#if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
+			DisplayAureus_Init(&DA);
+#endif
 
 #if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
        KingMeter_Init (&KM);
@@ -500,6 +510,12 @@ int main(void)
 
 	  //display message processing
 	  if(ui8_UART_flag){
+	  //{
+#if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
+		DisplayAureus_Service(&DA);
+#endif
+
+
 #if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
 	  kingmeter_update();
 #endif
@@ -1210,7 +1226,7 @@ static void MX_USART1_UART_Init(void)
 
   huart1.Instance = USART1;
 
-#if ((DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER) ||DISPLAY_TYPE==DISPLAY_TYPE_KUNTENG||DISPLAY_TYPE==DISPLAY_TYPE_EBiCS)
+#if ((DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER) ||DISPLAY_TYPE==DISPLAY_TYPE_KUNTENG||DISPLAY_TYPE==DISPLAY_TYPE_EBiCS || DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
   huart1.Init.BaudRate = 9600;
 #elif (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
   huart1.Init.BaudRate = 1200;
@@ -1633,6 +1649,9 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *UartHandle)
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *UartHandle) {
+#if (DISPLAY_TYPE == DISPLAY_TYPE_AUREUS)
+	DisplayAureus_Init(&DA);
+#endif
 #if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
        KingMeter_Init (&KM);
 #endif
