@@ -603,7 +603,7 @@ int main(void)
 
 		#ifdef TS_MODE //torque-sensor mode
 					//calculate current target form torque, cadence and assist level
-					int32_temp_current_target = (TS_COEF*(int16_t)(MS.assist_level)* (uint32_torque_cumulated>>5)/uint32_PAS)>>8; //>>5 aus Mittelung über eine Kurbelumdrehung, >>8 aus KM5S-Protokoll Assistlevel 0..255
+					int32_temp_current_target = (TS_COEF*(int16_t)(MS.assist_level)* (uint32_torque_cumulated>>5)/uint32_PAS)>>8; //>>5 aus Mittelung Ã¼ber eine Kurbelumdrehung, >>8 aus KM5S-Protokoll Assistlevel 0..255
 
 					//limit currest target to max value
 					if(int32_temp_current_target>PH_CURRENT_MAX) int32_temp_current_target = PH_CURRENT_MAX;
@@ -1449,7 +1449,7 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 			q31_rotorposition_absolute=q31_rotorposition_PLL;
 #else
 			//estimation by extrapolating directly from the hallsensor information
-			q31_rotorposition_absolute = q31_rotorposition_hall + (q31_t)(i16_hall_order * i8_recent_rotor_direction * ((10923 * ui16_tim2_recent)/ui16_timertics)<<16); //interpolate angle between two hallevents by scaling timer2 tics, 10923<<16 is 715827883 = 60°
+			q31_rotorposition_absolute = q31_rotorposition_hall + (q31_t)(i16_hall_order * i8_recent_rotor_direction * ((10923 * ui16_tim2_recent)/ui16_timertics)<<16); //interpolate angle between two hallevents by scaling timer2 tics, 10923<<16 is 715827883 = 60Â°
 #endif
 	   }
 	   else { //run in 6 step mode
@@ -1864,7 +1864,7 @@ void autodetect(){
    	q31_t diffangle=0;
    	HAL_Delay(5);
    	for(i=0;i<1080;i++){
-   		q31_rotorposition_absolute+=11930465; //drive motor in open loop with steps of 1°
+   		q31_rotorposition_absolute+=11930465; //drive motor in open loop with steps of 1Â°
    		HAL_Delay(5);
    		if (q31_rotorposition_absolute>-60&&q31_rotorposition_absolute<60){
    			switch (ui8_hall_case) //12 cases for each transition from one stage to the next. 6x forward, 6x reverse
