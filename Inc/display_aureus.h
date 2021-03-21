@@ -1,7 +1,8 @@
 #include "config.h"
 
-#define AUREUS_SIZE_RX_SETTINGS 15
-#define AUREUS_SIZE_RX_RUNNING 10
+//#define AUREUS_SIZE_RX_SETTINGS 15
+//#define AUREUS_SIZE_RX_RUNNING 10
+#define AUREUS_SIZE_RX 30
 #define AUREUS_SIZE_TX 13
 
 typedef struct
@@ -33,9 +34,6 @@ typedef struct
 
 typedef struct
 {
-    uint8_t         RxState;
-    uint32_t        LastRx;
-
     RX_SETTINGS_t   Settings;
     RX_PARAM_t      Rx;
     TX_PARAM_t      Tx;

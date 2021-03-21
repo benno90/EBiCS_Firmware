@@ -1,7 +1,7 @@
 {
     "configurations": [
         {
-            "name": "bluepill",
+            "name": "lishui",
             "includePath": [
                 "${workspaceFolder}/**"
             ],

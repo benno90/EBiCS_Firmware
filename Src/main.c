@@ -474,6 +474,7 @@ int main(void)
    	printf_("phase current offsets:  %d, %d, %d \n ", ui16_ph1_offset, ui16_ph2_offset, ui16_ph3_offset);
 #if (AUTODETECT == 1)
    	autodetect();
+	while(1) { };
 #endif
 
 #endif
@@ -487,7 +488,11 @@ int main(void)
    	}
 #endif
 
-
+	//q31_rotorposition_motor_specific = -167026406;
+	q31_rotorposition_motor_specific = -1789569706;  // -150 degrees
+	//q31_rotorposition_motor_specific = -1801499903;  // -152 degrees
+	//q31_rotorposition_motor_specific = 0;
+	i16_hall_order = 1;
  // set absolute position to corresponding hall pattern.
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
@@ -512,7 +517,20 @@ int main(void)
 	  if(ui8_UART_flag){
 	  //{
 #if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
+		// period [s] = tics x 6 x GEAR_RATIO / frequency    (frequency = 500kHz)
+		DA.Tx.Wheeltime_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / 500;
 		DisplayAureus_Service(&DA);
+		if(DA.Rx.Headlight)
+		{
+   		    HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_SET);
+        	//HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+		}
+		else
+		{
+   		    HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_RESET);
+		}
+  
+		  
 #endif
 
 
@@ -739,6 +757,7 @@ int main(void)
 
 //------------------------------------------------------------------------------------------------------------
 				//enable PWM if power is wanted
+		//int32_current_target = 0;  // xx
 	  if (int32_current_target>0&&!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE)){
 		  speed_PLL(0,0);//reset integral part
 
@@ -793,7 +812,8 @@ int main(void)
 		  //print values for debugging
 
 
-		 sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
+		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
+		 sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
 		  i=0;
@@ -1231,7 +1251,7 @@ static void MX_USART1_UART_Init(void)
 #elif (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
   huart1.Init.BaudRate = 1200;
 #else
-  huart1.Init.BaudRate = 56000;
+  huart1.Init.BaudRate = 57600;
 #endif
 
 
@@ -1885,7 +1905,7 @@ void autodetect(){
    	for(i=0;i<1080;i++){
    		q31_rotorposition_absolute+=11930465; //drive motor in open loop with steps of 1°
    		HAL_Delay(5);
-   		if (q31_rotorposition_absolute>-60&&q31_rotorposition_absolute<60){
+   		if (q31_rotorposition_absolute>-60&&q31_rotorposition_absolute<300){
    			switch (ui8_hall_case) //12 cases for each transition from one stage to the next. 6x forward, 6x reverse
    						{
    					//6 cases for forward direction
@@ -1951,6 +1971,7 @@ void autodetect(){
    		if(ui8_hall_case==zerocrossing)
    		{
    			q31_rotorposition_motor_specific = q31_rotorposition_absolute-diffangle-(1<<31);
+   			printf_("   ZEROCROSSING: angle: %d, hallstate:  %d, hallcase %d \n",(int16_t)(((q31_rotorposition_motor_specific>>23)*180)>>8), ui8_hall_state , ui8_hall_case);
    		}
 
 
@@ -1983,6 +2004,7 @@ void autodetect(){
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
     printf_("Motor specific angle:  %d, direction %d \n ", (int16_t)(((q31_rotorposition_motor_specific>>23)*180)>>8), i16_hall_order);
+	printf_("benno: %d\n", q31_rotorposition_motor_specific);
 #endif
 
     HAL_Delay(5);

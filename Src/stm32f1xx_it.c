@@ -401,13 +401,21 @@ void TIM3_IRQHandler(void)
 */
 void USART1_IRQHandler(void)
 {
-  /* USER CODE BEGIN USART1_IRQn 0 */
 
-  /* USER CODE END USART1_IRQn 0 */
-  HAL_UART_IRQHandler(&huart1);
-  /* USER CODE BEGIN USART1_IRQn 1 */
-
-  /* USER CODE END USART1_IRQn 1 */
+  if (huart1.Instance->SR & UART_FLAG_IDLE) 
+  {
+    // clear the IDLE interrupt
+    // see RM0008 27.6.1 Status register (USART_SR)
+    __HAL_UART_CLEAR_IDLEFLAG(&huart1);
+    //
+    HAL_UART_DMAStop(&huart1);
+    //
+    HAL_UART_RxCpltCallback(&huart1);
+	} 
+  else 
+  {  
+    HAL_UART_IRQHandler(&huart1);
+  }
 }
 
 /* USER CODE BEGIN 1 */
