@@ -1659,7 +1659,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *UartHandle)
 {
+#if (DISPLAY_TYPE != DISPLAY_TYPE_AUREUS) // -> My_UART_IdleItCallback
 	ui8_UART_flag=1;
+#endif
 
 }
 

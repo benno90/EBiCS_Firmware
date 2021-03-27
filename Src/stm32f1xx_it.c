@@ -408,9 +408,10 @@ void USART1_IRQHandler(void)
     // see RM0008 27.6.1 Status register (USART_SR)
     __HAL_UART_CLEAR_IDLEFLAG(&huart1);
     //
-    HAL_UART_DMAStop(&huart1);
+    //HAL_UART_DMAStop(&huart1);
     //
-    HAL_UART_RxCpltCallback(&huart1);
+    //HAL_UART_RxCpltCallback(&huart1);
+    My_UART_IdleItCallback();
 	} 
   else 
   {  

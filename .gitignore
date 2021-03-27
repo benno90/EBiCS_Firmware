@@ -21,3 +21,5 @@ build
 /Release/
 
 .cortex-debug*
+
+.vscode/settings.json

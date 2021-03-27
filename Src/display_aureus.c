@@ -1,19 +1,48 @@
 #include "display_aureus.h"
-//#include "main.h"
+#include "main.h"
 #include "stm32f1xx_hal.h"
 
 
+#define RX_BYTE(b) (buffer_index1 + b) % AUREUS_SIZE_DMA_BUFFER
+
+extern volatile uint8_t ui8_UART_flag;
 extern UART_HandleTypeDef huart1;
-static uint8_t RxBuff[AUREUS_SIZE_RX];
+
+
+static uint32_t prevCNDTR = AUREUS_SIZE_DMA_BUFFER;
+static uint8_t buffer_index1 = 0;           // circular buffer read position
+static uint8_t buffer_index2 = 0;           // circular buffer write position
+static uint8_t bytes_received = 0;
+static uint8_t RxBuff[AUREUS_SIZE_DMA_BUFFER];
 static uint8_t TxBuff[AUREUS_SIZE_TX];
 
 void DisplayAureus_Init(DISPLAY_AUREUS_t* DA_ctx)
 {
   __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE); 			// enable idle line interrupt
-  if (HAL_UART_Receive_DMA(&huart1, (uint8_t *) RxBuff, AUREUS_SIZE_RX) != HAL_OK)
+  if (HAL_UART_Receive_DMA(&huart1, (uint8_t *) RxBuff, AUREUS_SIZE_DMA_BUFFER) != HAL_OK)
   {
  	  Error_Handler();
   }
+
+}
+
+void My_UART_IdleItCallback(void)
+{
+  if(prevCNDTR < DMA1_Channel5->CNDTR)
+  {
+    bytes_received = AUREUS_SIZE_DMA_BUFFER - DMA1_Channel5->CNDTR + prevCNDTR; 
+  }
+  else
+  {
+    bytes_received = (prevCNDTR - DMA1_Channel5->CNDTR);
+  }
+  prevCNDTR = DMA1_Channel5->CNDTR;
+  buffer_index2 = (buffer_index2 + bytes_received) % AUREUS_SIZE_DMA_BUFFER;
+  
+  ui8_UART_flag = 1; // global
+
+  //buffer_index1 = buffer_index2;
+
 
 }
 
@@ -27,27 +56,27 @@ static uint8_t DisplayAureus_CheckSettingsMessage(uint8_t bytes_received)
 
   // header and trailer
 
-  if(RxBuff[0] != 0x3A)
+  if(RxBuff[RX_BYTE(0)] != 0x3A)
     return 0;
 
-  if(RxBuff[1] != 0x1A)
+  if(RxBuff[RX_BYTE(1)] != 0x1A)
     return 0;
   
-  if(RxBuff[2] != 0x53)
+  if(RxBuff[RX_BYTE(2)] != 0x53)
     return 0;
 
-  if(RxBuff[13] != 0x0D)
+  if(RxBuff[RX_BYTE(13)] != 0x0D)
     return 0;
 
-  if(RxBuff[14] != 0x0A)
+  if(RxBuff[RX_BYTE(14)] != 0x0A)
     return 0;
 
   // checksum
   for(uint8_t i = 1; i <= 10; ++i)
   {
-    checksum += RxBuff[i];
+    checksum += RxBuff[RX_BYTE(i)];
   }
-  checksum_rx = RxBuff[11] + (RxBuff[12] << 8);
+  checksum_rx = RxBuff[RX_BYTE(11)] + (RxBuff[RX_BYTE(12)] << 8);
   if(checksum == checksum_rx)
   {
     return 1;
@@ -68,24 +97,24 @@ static uint8_t DisplayAureus_CheckRunningMessage(uint8_t bytes_received)
 
   // header and trailer
 
-  if(RxBuff[0] != 0x3A)
+  if(RxBuff[RX_BYTE(0)] != 0x3A)
     return 0;
 
-  if(RxBuff[1] != 0x1A)
+  if(RxBuff[RX_BYTE(1)] != 0x1A)
     return 0;
 
-  if(RxBuff[2] != 0x52)
+  if(RxBuff[RX_BYTE(2)] != 0x52)
     return 0;
 
-  if(RxBuff[8] != 0x0D)
+  if(RxBuff[RX_BYTE(8)] != 0x0D)
     return 0;
 
-  if(RxBuff[9] != 0x0A)
+  if(RxBuff[RX_BYTE(9)] != 0x0A)
     return 0;
 
   // checksum
-  checksum = RxBuff[1] + RxBuff[2] + RxBuff[3] + RxBuff[4] + RxBuff[5];
-  checksum_rx = RxBuff[6] + (RxBuff[7] << 8);
+  checksum = RxBuff[RX_BYTE(1)] + RxBuff[RX_BYTE(2)] + RxBuff[RX_BYTE(3)] + RxBuff[RX_BYTE(4)] + RxBuff[RX_BYTE(5)];
+  checksum_rx = RxBuff[RX_BYTE(6)] + (RxBuff[RX_BYTE(7)] << 8);
   
   if(checksum == checksum_rx)
   {
@@ -100,7 +129,7 @@ static uint8_t DisplayAureus_CheckRunningMessage(uint8_t bytes_received)
 void DisplayAureus_Service(DISPLAY_AUREUS_t* DA_ctx)
 {
   uint16_t checksum;
-  uint8_t bytes_received = (AUREUS_SIZE_RX - DMA1_Channel5->CNDTR);
+  //uint8_t bytes_received = (AUREUS_SIZE_DMA_BUFFER - DMA1_Channel5->CNDTR);
 
   if(DisplayAureus_CheckRunningMessage(bytes_received))
   {
@@ -132,7 +161,7 @@ void DisplayAureus_Service(DISPLAY_AUREUS_t* DA_ctx)
     //
 
     // light
-    if(RxBuff[5] & 0x80)
+    if(RxBuff[RX_BYTE(5)] & 0x80)
     {
       DA_ctx->Rx.Headlight = 1;
     }
@@ -142,7 +171,7 @@ void DisplayAureus_Service(DISPLAY_AUREUS_t* DA_ctx)
     }
 
     // pas levels
-    switch(RxBuff[4])
+    switch(RxBuff[RX_BYTE(4)])
     {
       case 0x66:
         DA_ctx->Rx.AssistLevel = 1;
@@ -175,8 +204,10 @@ void DisplayAureus_Service(DISPLAY_AUREUS_t* DA_ctx)
     TxBuff[3] = 0x05;
     TxBuff[4] = 0x0;           // low voltage
     TxBuff[5] = 0x0;          // battery current
+    // 27.03.21: display did not change to running mode with wheel cycle time = 0x0DC1 (3521), but when setting it to 0x0D75 (3446) it worked ..
     TxBuff[6] = 0x0D;         // wheel cycle time high byte (0D)
-    TxBuff[7] = 0xC1;         // wheel cycle time low byte (AC)
+    TxBuff[7] = 0x76;         // wheel cycle time low byte (AC)
+    //TxBuff[7] = 0xC1;         // wheel cycle time low byte (AC)
     TxBuff[8] = 0x0;          // error code
     uint16_t checksum = TxBuff[1] + TxBuff[2] + TxBuff[3] + TxBuff[4] + TxBuff[5] + TxBuff[6] + TxBuff[7] + TxBuff[8];
     TxBuff[9] = checksum & 0xFF;
@@ -184,12 +215,16 @@ void DisplayAureus_Service(DISPLAY_AUREUS_t* DA_ctx)
     TxBuff[11] = 0x0D;
     TxBuff[12] = 0x0A;
     //
-    HAL_UART_Transmit_DMA(&huart1, TxBuff, 13);
+    HAL_UART_Transmit_DMA(&huart1, TxBuff, AUREUS_SIZE_TX);
   }
   		
   // reset dma number of data to be transferred.
-  DMA1_Channel5->CNDTR = AUREUS_SIZE_RX;
-  __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
-  HAL_UART_Receive_DMA(&huart1, RxBuff, AUREUS_SIZE_RX);
+  //DMA1_Channel5->CNDTR = AUREUS_SIZE_DMA_BUFFER;
+  //__HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
+  //HAL_UART_Receive_DMA(&huart1, RxBuff, AUREUS_SIZE_DMA_BUFFER);
+
+
+  // set buffer read index to buffer write index
+  buffer_index1 = buffer_index2;
 
 }

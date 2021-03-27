@@ -103,6 +103,8 @@ int32_t map (int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t
 void autodetect();
 void runPIcontrol();
 
+void My_UART_IdleItCallback(void);
+
 extern uint16_t switchtime[3];
 extern uint32_t ui32_tim1_counter;
 extern uint32_t uint32_PAS_counter;
