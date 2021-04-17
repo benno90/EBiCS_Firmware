@@ -2,6 +2,10 @@
 #include "main.h"
 #include "stm32f1xx_hal.h"
 
+static const uint8_t shake_hands_byte[64] =  { 0x89, 0x9F, 0x86, 0xF9, 0x58, 0x0B, 0xFA, 0x3D, 0x21, 0x96, 0x03, 0xC1, 
+0x76, 0x8D, 0xD1, 0x5E, 0xE2, 0x44, 0x92, 0x9E, 0x91, 0x7F, 0xD8, 0x3E, 0x74, 0xE6, 0x65, 0xD3, 0xFB, 0x36, 0xE5, 0xF7, 
+0x14, 0xDE, 0x3B, 0x3F, 0x23, 0xFC, 0x8E, 0xEE, 0x17, 0xC5, 0x54, 0x4D, 0x93, 0xAD, 0xD2, 0x39, 0x8E, 0xDF, 0x9D, 0x61, 
+0x24, 0xA0, 0xE5, 0xED, 0x4B, 0x50, 0x25, 0x71, 0x9A, 0x58, 0x17, 0x78 };  
 
 #define RX_BYTE(b) (buffer_index1 + b) % AUREUS_SIZE_DMA_BUFFER
 
@@ -63,6 +67,9 @@ static uint8_t DisplayAureus_CheckSettingsMessage(uint8_t bytes_received)
     return 0;
   
   if(RxBuff[RX_BYTE(2)] != 0x53)
+    return 0;
+  
+  if(RxBuff[RX_BYTE(9)] > 63)  // according to the protocol specification the shake hands byte should be in the range 0-63
     return 0;
 
   if(RxBuff[RX_BYTE(13)] != 0x0D)
@@ -171,27 +178,8 @@ void DisplayAureus_Service(DISPLAY_AUREUS_t* DA_ctx)
     }
 
     // pas levels
-    switch(RxBuff[RX_BYTE(4)])
-    {
-      case 0x66:
-        DA_ctx->Rx.AssistLevel = 1;
-        break;
-      case 0x8C:
-        DA_ctx->Rx.AssistLevel = 2;
-        break;
-      case 0xB2:
-        DA_ctx->Rx.AssistLevel = 3;
-        break;
-      case 0xD8:
-        DA_ctx->Rx.AssistLevel = 4;
-        break;
-      case 0xFF:
-        DA_ctx->Rx.AssistLevel = 5;
-        break;
-      default:
-        DA_ctx->Rx.AssistLevel = 1;
-        break;
-    }
+    DA_ctx->Rx.AssistLevel = RxBuff[RX_BYTE(4)];
+
   }
   else if(DisplayAureus_CheckSettingsMessage(bytes_received))
   {
@@ -204,10 +192,8 @@ void DisplayAureus_Service(DISPLAY_AUREUS_t* DA_ctx)
     TxBuff[3] = 0x05;
     TxBuff[4] = 0x0;           // low voltage
     TxBuff[5] = 0x0;          // battery current
-    // 27.03.21: display did not change to running mode with wheel cycle time = 0x0DC1 (3521), but when setting it to 0x0D75 (3446) it worked ..
     TxBuff[6] = 0x0D;         // wheel cycle time high byte (0D)
-    TxBuff[7] = 0x76;         // wheel cycle time low byte (AC)
-    //TxBuff[7] = 0xC1;         // wheel cycle time low byte (AC)
+    TxBuff[7] = shake_hands_byte[RxBuff[RX_BYTE(9)]];
     TxBuff[8] = 0x0;          // error code
     uint16_t checksum = TxBuff[1] + TxBuff[2] + TxBuff[3] + TxBuff[4] + TxBuff[5] + TxBuff[6] + TxBuff[7] + TxBuff[8];
     TxBuff[9] = checksum & 0xFF;

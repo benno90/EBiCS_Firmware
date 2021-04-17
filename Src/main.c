@@ -145,6 +145,9 @@ uint32_t uint32_SPEED_counter=32000;
 uint32_t uint32_SPEEDx100_cumulated=0;
 uint32_t uint32_PAS=32000;
 
+uint32_t uint32_PAS_raw=32000;
+uint8_t uint8_pedaling = 0;
+
 q31_t q31_rotorposition_PLL = 0;
 q31_t q31_angle_per_tic = 0;
 
@@ -519,6 +522,10 @@ int main(void)
 #if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
 		// period [s] = tics x 6 x GEAR_RATIO / frequency    (frequency = 500kHz)
 		DA.Tx.Wheeltime_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / 500;
+		if(DA.Tx.Wheeltime_ms > 0x0DAC)
+		{
+			DA.Tx.Wheeltime_ms = 0x0DAC;
+		}
 		DisplayAureus_Service(&DA);
 		if(DA.Rx.Headlight)
 		{
@@ -554,14 +561,16 @@ int main(void)
 #endif
 
 	  ui8_UART_flag=0;
-	  }
+	  } // end UART processing
 
 	  //PAS signal processing
+	  //
 	  if(ui8_PAS_flag){
 		  if(uint32_PAS_counter>100){ //debounce
 		  uint32_PAS_cumulated -= uint32_PAS_cumulated>>2;
 		  uint32_PAS_cumulated += uint32_PAS_counter;
 		  uint32_PAS = uint32_PAS_cumulated>>2;
+		  uint32_PAS_raw = uint32_PAS_counter;
 
 		  uint32_PAS_HIGH_accumulated-=uint32_PAS_HIGH_accumulated>>2;
 		  uint32_PAS_HIGH_accumulated+=uint32_PAS_HIGH_counter;
@@ -574,6 +583,22 @@ int main(void)
 		  uint32_torque_cumulated -= uint32_torque_cumulated>>5;
 		  if(ui16_reg_adc_value>THROTTLE_OFFSET)uint32_torque_cumulated += (ui16_reg_adc_value-THROTTLE_OFFSET);
 		  }
+	  }
+
+	  if(uint32_PAS_counter >= PAS_TIMEOUT)
+	  {
+		  //uint32_PAS = PAS_TIMEOUT;
+		  uint32_PAS_raw = PAS_TIMEOUT;
+		  //uint32_PAS_cumulated = PAS_TIMEOUT << 2;
+	  }
+
+	  if(uint32_PAS_raw >= PAS_TIMEOUT)
+	  {
+		  uint8_pedaling = 0;
+	  }
+	  else
+	  {
+		  uint8_pedaling = 1;
 	  }
 
 	  //SPEED signal processing
@@ -599,7 +624,7 @@ int main(void)
 		uint32_SPEEDx100_cumulated +=internal_tics_to_speedx100(uint32_tics_filtered>>3);
 #endif
 		ui8_SPEED_control_flag=0;
-	  }
+	  } // end speed processing
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && defined(FAST_LOOP_LOG))
 		if(ui8_debug_state==3 && ui8_UART_TxCplt_flag){
@@ -637,7 +662,13 @@ int main(void)
 
 		#ifdef TS_MODE //torque-sensor mode
 					//calculate current target form torque, cadence and assist level
-					int32_temp_current_target = (TS_COEF*(int16_t)(MS.assist_level)* (uint32_torque_cumulated>>5)/uint32_PAS)>>8; //>>5 aus Mittelung über eine Kurbelumdrehung, >>8 aus KM5S-Protokoll Assistlevel 0..255
+					//int32_temp_current_target = (TS_COEF*(int16_t)(MS.assist_level)* (uint32_torque_cumulated>>5)/uint32_PAS)>>8; //>>5 aus Mittelung über eine Kurbelumdrehung, >>8 aus KM5S-Protokoll Assistlevel 0..255
+
+					int32_current_target = 0;
+					if(uint8_pedaling)
+					{
+						int32_temp_current_target = 400;
+					}
 
 					//limit currest target to max value
 					if(int32_temp_current_target>PH_CURRENT_MAX) int32_temp_current_target = PH_CURRENT_MAX;
@@ -757,7 +788,7 @@ int main(void)
 
 //------------------------------------------------------------------------------------------------------------
 				//enable PWM if power is wanted
-		//int32_current_target = 0;  // xx
+		//int32_current_target = 0;  // x
 	  if (int32_current_target>0&&!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE)){
 		  speed_PLL(0,0);//reset integral part
 
@@ -812,8 +843,15 @@ int main(void)
 		  //print values for debugging
 
 
+		uint8_t pin_state = HAL_GPIO_ReadPin(PAS_GPIO_Port, PAS_Pin);
+		//sprintf_(buffer, "%u %u\n", uint32_PAS, uint32_PAS_raw); 
+		//sprintf_(buffer, "%u\n", pin_state); 
+		//sprintf_(buffer, "%u\n", ui16_reg_adc_value); 
+		//sprintf_(buffer, "%u %u %u %u %u\n", pin_state, adcData[0], adcData[1], adcData[5], adcData[6]);
+		sprintf_(buffer, "%d %d\n", MS.u_d, MS.u_q);
+
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
-		 sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
+		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
 		  i=0;
@@ -868,7 +906,7 @@ int main(void)
   }
   /* USER CODE END 3 */
 
-}
+} // end main while loop
 
 /**
   * @brief System Clock Configuration
@@ -1251,7 +1289,7 @@ static void MX_USART1_UART_Init(void)
 #elif (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
   huart1.Init.BaudRate = 1200;
 #else
-  huart1.Init.BaudRate = 57600;
+  huart1.Init.BaudRate = 115200;
 #endif
 
 
