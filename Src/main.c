@@ -110,6 +110,7 @@ uint32_t ui32_reg_adc_value_filter;
 uint16_t ui16_ph1_offset=0;
 uint16_t ui16_ph2_offset=0;
 uint16_t ui16_ph3_offset=0;
+uint16_t ui16_torque_offset = 0;
 int16_t i16_ph1_current=0;
 
 int16_t i16_ph2_current=0;
@@ -137,7 +138,7 @@ volatile uint8_t ui8_SPEED_flag=0;
 volatile uint8_t ui8_SPEED_control_flag=0;
 volatile uint8_t ui8_BC_limit_flag=0;  //flag for Battery current limitation
 volatile uint8_t ui8_6step_flag=0;
-uint32_t uint32_PAS_counter= PAS_TIMEOUT+1;
+uint32_t uint32_PAS_counter = PAS_TIMEOUT;
 uint32_t uint32_PAS_HIGH_counter= 0;
 uint32_t uint32_PAS_HIGH_accumulated= 32000;
 uint32_t uint32_PAS_fraction= 100;
@@ -457,24 +458,29 @@ int main(void)
 
     HAL_Delay(200); //wait for stable conditions
 
-    for(i=0;i<32;i++){
+    for(i = 0; i < 32; i++)
+	{
     	while(!ui8_adc_regular_flag){}
-    	ui16_ph1_offset+=adcData[2];
-    	ui16_ph2_offset+=adcData[3];
-    	ui16_ph3_offset+=adcData[4];
-    	ui8_adc_regular_flag=0;
+    	ui16_ph1_offset += adcData[2];
+    	ui16_ph2_offset += adcData[3];
+    	ui16_ph3_offset += adcData[4];
+		ui16_torque_offset += adcData[TQ_ADC_INDEX];
+    	ui8_adc_regular_flag = 0;
 
     }
-    ui16_ph1_offset=ui16_ph1_offset>>5;
-    ui16_ph2_offset=ui16_ph2_offset>>5;
-    ui16_ph3_offset=ui16_ph3_offset>>5;
+    ui16_ph1_offset = ui16_ph1_offset >> 5;
+    ui16_ph2_offset = ui16_ph2_offset >> 5;
+    ui16_ph3_offset = ui16_ph3_offset >> 5;
+	ui16_torque_offset = ui16_torque_offset >> 5;
+	ui16_torque_offset += 50; // hardcoded offset -> move to config.h
 
 
 
-   	ui8_adc_offset_done_flag=1;
+   	ui8_adc_offset_done_flag = 1;
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
    	printf_("phase current offsets:  %d, %d, %d \n ", ui16_ph1_offset, ui16_ph2_offset, ui16_ph3_offset);
+   	printf_("torque offset:  %d\n", ui16_torque_offset);
 #if (AUTODETECT == 1)
    	autodetect();
 	while(1) { };
@@ -587,9 +593,9 @@ int main(void)
 
 	  if(uint32_PAS_counter >= PAS_TIMEOUT)
 	  {
-		  //uint32_PAS = PAS_TIMEOUT;
+		  uint32_PAS = PAS_TIMEOUT;
 		  uint32_PAS_raw = PAS_TIMEOUT;
-		  //uint32_PAS_cumulated = PAS_TIMEOUT << 2;
+		  uint32_PAS_cumulated = PAS_TIMEOUT << 2;
 	  }
 
 	  if(uint32_PAS_raw >= PAS_TIMEOUT)
@@ -673,7 +679,7 @@ int main(void)
 					//limit currest target to max value
 					if(int32_temp_current_target>PH_CURRENT_MAX) int32_temp_current_target = PH_CURRENT_MAX;
 					//set target to zero, if pedals are not turning
-					if(uint32_PAS_counter > PAS_TIMEOUT){
+					if(uint32_PAS_counter >= PAS_TIMEOUT){
 						int32_temp_current_target = 0;
 						if(uint32_torque_cumulated>0)uint32_torque_cumulated--; //ramp down cumulated torque value
 					}
@@ -788,7 +794,7 @@ int main(void)
 
 //------------------------------------------------------------------------------------------------------------
 				//enable PWM if power is wanted
-		//int32_current_target = 0;  // x
+		int32_current_target = 0;  // x
 	  if (int32_current_target>0&&!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE)){
 		  speed_PLL(0,0);//reset integral part
 
@@ -848,7 +854,11 @@ int main(void)
 		//sprintf_(buffer, "%u\n", pin_state); 
 		//sprintf_(buffer, "%u\n", ui16_reg_adc_value); 
 		//sprintf_(buffer, "%u %u %u %u %u\n", pin_state, adcData[0], adcData[1], adcData[5], adcData[6]);
-		sprintf_(buffer, "%d %d\n", MS.u_d, MS.u_q);
+		//uint32_t pas_rpm = 21818 / uint32_PAS;
+		uint32_t pas_omega = 2285 / uint32_PAS;
+		uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
+		uint16_t pedal_power = pas_omega * torque_nm;
+		sprintf_(buffer, "%u\n", pedal_power);
 
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
@@ -1400,12 +1410,16 @@ static void MX_GPIO_Init(void)
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	if (htim == &htim3) {
-		if(ui32_tim3_counter<32000)ui32_tim3_counter++;
-		if (uint32_PAS_counter < PAS_TIMEOUT+1){
-			  uint32_PAS_counter++;
-			  if(HAL_GPIO_ReadPin(PAS_GPIO_Port, PAS_Pin))uint32_PAS_HIGH_counter++;
+	if(htim == &htim3) 
+	{
+		if(ui32_tim3_counter < 32000) ui32_tim3_counter++;
+		//
+		if(uint32_PAS_counter < PAS_TIMEOUT)
+		{
+			uint32_PAS_counter++;
+			if(HAL_GPIO_ReadPin(PAS_GPIO_Port, PAS_Pin)) uint32_PAS_HIGH_counter++;
 		}
+		//
 		if (uint32_SPEED_counter<128000)uint32_SPEED_counter++;					//counter for external Speedsensor
 		if(uint16_full_rotation_counter<8000)uint16_full_rotation_counter++;	//full rotation counter for motor standstill detection
 		if(uint16_half_rotation_counter<8000)uint16_half_rotation_counter++;	//half rotation counter for motor standstill detection
@@ -1418,14 +1432,24 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 // regular ADC callback
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-	ui32_reg_adc_value_filter -= ui32_reg_adc_value_filter>>4;
-#ifdef TQONAD1
-	ui32_reg_adc_value_filter += adcData[6]; //get value from AD1
-#else
-	ui32_reg_adc_value_filter += adcData[1]; //get value from SP
-#endif
-	ui16_reg_adc_value = ui32_reg_adc_value_filter>>4;
+	uint16_t torque_adc = adcData[TQ_ADC_INDEX];
 
+	if(torque_adc > ui16_torque_offset)
+	{
+		torque_adc = adcData[TQ_ADC_INDEX] - ui16_torque_offset;
+		ui32_reg_adc_value_filter -= ui32_reg_adc_value_filter>>4;
+	
+		ui32_reg_adc_value_filter += torque_adc;
+	
+		ui16_reg_adc_value = ui32_reg_adc_value_filter>>4;
+	}
+	else
+	{
+		ui32_reg_adc_value_filter = 0;
+		ui16_reg_adc_value = 0;
+	}
+		
+		
 	ui8_adc_regular_flag=1;
 
 }
