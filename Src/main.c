@@ -64,6 +64,10 @@
   #include "display_aureus.h"
 #endif
 
+#if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
+  #include "display_debug.h"
+#endif
+
 #if (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
   #include "display_bafang.h"
 #endif
@@ -206,6 +210,10 @@ KINGMETER_t KM;
 
 #if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
 DISPLAY_AUREUS_t DA;
+#endif
+
+#if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
+DISPLAY_DEBUG_t DD;
 #endif
 
 //variables for display communication
@@ -430,6 +438,10 @@ int main(void)
 			DisplayAureus_Init(&DA);
 #endif
 
+#if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
+			DisplayDebug_Init(&DD);
+#endif
+
 #if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
        KingMeter_Init (&KM);
 #endif
@@ -544,6 +556,19 @@ int main(void)
 		}
   
 		  
+#endif
+
+#if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
+		DisplayDebug_Service(&DD);
+		if(DD.light)
+		{
+   		    HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_SET);
+        	//HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+		}
+		else
+		{
+   		    HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_RESET);
+		}
 #endif
 
 
@@ -858,7 +883,7 @@ int main(void)
 		uint32_t pas_omega = 2285 / uint32_PAS;
 		uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
 		uint16_t pedal_power = pas_omega * torque_nm;
-		sprintf_(buffer, "%u\n", pedal_power);
+		//sprintf_(buffer, "%u\n", pedal_power);
 
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
@@ -1721,10 +1746,19 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *UartHandle)
 {
-#if (DISPLAY_TYPE != DISPLAY_TYPE_AUREUS) // -> My_UART_IdleItCallback
+#if ( (DISPLAY_TYPE != DISPLAY_TYPE_AUREUS) && (DISPLAY_TYPE != DISPLAY_TYPE_DEBUG) ) // -> My_UART_IdleItCallback
 	ui8_UART_flag=1;
 #endif
 
+}
+
+void My_UART_IdleItCallback(void)
+{
+#if (DISPLAY_TYPE == DISPLAY_TYPE_AUREUS)
+	Aureus_UART_IdleItCallback();
+#elif (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
+	Debug_UART_IdleItCallback();
+#endif
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *UartHandle)
@@ -1736,6 +1770,11 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *UartHandle) {
 #if (DISPLAY_TYPE == DISPLAY_TYPE_AUREUS)
 	DisplayAureus_Init(&DA);
 #endif
+
+#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
+	DisplayDebug_Init(&DD);
+#endif
+
 #if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
        KingMeter_Init (&KM);
 #endif

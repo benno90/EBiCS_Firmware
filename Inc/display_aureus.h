@@ -41,5 +41,6 @@ typedef struct
 } DISPLAY_AUREUS_t;
 
 
+void Aureus_UART_IdleItCallback(void);
 void DisplayAureus_Init(DISPLAY_AUREUS_t* DA_ctx);
 void DisplayAureus_Service(DISPLAY_AUREUS_t* DA_ctx);

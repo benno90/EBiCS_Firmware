@@ -30,7 +30,7 @@ void DisplayAureus_Init(DISPLAY_AUREUS_t* DA_ctx)
 
 }
 
-void My_UART_IdleItCallback(void)
+void Aureus_UART_IdleItCallback(void)
 {
   if(prevCNDTR < DMA1_Channel5->CNDTR)
   {

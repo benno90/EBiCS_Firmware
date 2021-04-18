@@ -58,6 +58,7 @@ Src/system_stm32f1xx.c \
 Src/FOC.c \
 Src/display_kingmeter.c \
 Src/display_aureus.c \
+Src/display_debug.c \
 Src/display_bafang.c \
 Src/display_ebics.c \
 Src/display_kunteng.c \
