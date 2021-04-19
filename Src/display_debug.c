@@ -15,6 +15,8 @@ static uint8_t RxBuff[DEBUG_SIZE_RX_DMA_BUFFER];
 static uint8_t TxBuff[DEBUG_SIZE_TX_DMA_BUFFER];
 static uint8_t Buff[DEBUG_SIZE_RX_DMA_BUFFER];
 
+static uint8_t do_log = 0;
+
 void DisplayDebug_Init(DISPLAY_DEBUG_t *DD_ctx)
 {
     __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE); // enable idle line interrupt
@@ -23,8 +25,10 @@ void DisplayDebug_Init(DISPLAY_DEBUG_t *DD_ctx)
         Error_Handler();
     }
 
+    DD_ctx->go = 0;
+    DD_ctx->log = 0;
     DD_ctx->light = 0;
-    DD_ctx->current_target = 0;
+    DD_ctx->ui16_value = 0;
 }
 
 void Debug_UART_IdleItCallback(void)
@@ -43,6 +47,34 @@ void Debug_UART_IdleItCallback(void)
     ui8_UART_flag = 1; // global
 
     //buffer_index1 = buffer_index2;
+}
+
+void debug_print(uint8_t* data, uint16_t size)
+{
+    if(size >= DEBUG_SIZE_TX_DMA_BUFFER)
+    {
+        return;
+    }
+    
+    if(ui8_UART_TxCplt_flag && do_log)
+    {
+        HAL_UART_Transmit_DMA(&huart1, data, size);
+        ui8_UART_TxCplt_flag = 0;
+    }
+}
+
+static void debug_print2(uint8_t* data, uint16_t size)
+{
+    if(size >= DEBUG_SIZE_TX_DMA_BUFFER)
+    {
+        return;
+    }
+
+    if(ui8_UART_TxCplt_flag)
+    {
+        HAL_UART_Transmit_DMA(&huart1, data, size);
+        ui8_UART_TxCplt_flag = 0;
+    }
 }
 
 void DisplayDebug_Service(DISPLAY_DEBUG_t *DD_ctx)
@@ -65,26 +97,67 @@ void DisplayDebug_Service(DISPLAY_DEBUG_t *DD_ctx)
     {
         Buff[i] = RxBuff[RX_BYTE(i)];
     }
+    Buff[bytes_received] = '\0';
 
-    if(strncmp(Buff, "hello", DEBUG_SIZE_RX_DMA_BUFFER) == 0)
+
+    if(strncmp(Buff, "go", DEBUG_SIZE_RX_DMA_BUFFER) == 0)
+    {
+        DD_ctx->go = !(DD_ctx->go);
+        if(DD_ctx->go)
+        {
+            strcpy(TxBuff, "go!\n");
+            debug_print2(TxBuff, 4);
+        }
+        else
+        {
+            strcpy(TxBuff, "stop\n");
+            debug_print2(TxBuff, 5);
+        }
+    }
+    else if(strncmp(Buff, "v ", 2) == 0)
+    {
+        // parse value
+        DD_ctx->ui16_value = atoi(&Buff[2]);
+        if(DD_ctx->ui16_value > 600)
+        {
+            DD_ctx->ui16_value = 600;
+        }
+        sprintf_(TxBuff, "ui16_value = %u\n", DD_ctx->ui16_value);
+        debug_print2(TxBuff, strlen(TxBuff));
+    }
+    else if(strncmp(Buff, "log", DEBUG_SIZE_RX_DMA_BUFFER) == 0)
+    {
+        DD_ctx->log = !(DD_ctx->log);
+        do_log = DD_ctx->log;
+        if(DD_ctx->log)
+        {
+            strcpy(TxBuff, "log on\n");
+            debug_print2(TxBuff, 7);
+        }
+        else
+        {
+            strcpy(TxBuff, "log off\n");
+            debug_print2(TxBuff, 8);
+        }
+    }
+    else if(strncmp(Buff, "hello", DEBUG_SIZE_RX_DMA_BUFFER) == 0)
     {
         strcpy(TxBuff, "hello\n");
-        HAL_UART_Transmit_DMA(&huart1, TxBuff, 6);
+        debug_print2(TxBuff, 6);
     }
-    
-    if(strncmp(Buff, "light", DEBUG_SIZE_RX_DMA_BUFFER) == 0)
+    else if(strncmp(Buff, "light", DEBUG_SIZE_RX_DMA_BUFFER) == 0)
     {
         // toggle light
         DD_ctx->light = !(DD_ctx->light);
         if(DD_ctx->light)
         {
             strcpy(TxBuff, "light on\n");
-            HAL_UART_Transmit_DMA(&huart1, TxBuff, 9);
+            debug_print2(TxBuff, 9);
         }
         else
         {
             strcpy(TxBuff, "light off\n");
-            HAL_UART_Transmit_DMA(&huart1, TxBuff, 10);
+            debug_print2(TxBuff, 10);
         }
     }
 

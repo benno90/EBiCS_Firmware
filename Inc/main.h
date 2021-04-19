@@ -109,6 +109,8 @@ extern uint16_t switchtime[3];
 extern uint32_t ui32_tim1_counter;
 extern uint32_t uint32_PAS_counter;
 
+extern volatile uint8_t ui8_UART_TxCplt_flag;
+
 typedef struct
 {
 

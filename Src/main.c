@@ -123,7 +123,6 @@ int16_t i16_ph3_current=0;
 uint16_t i=0;
 uint16_t j=0;
 uint16_t k=0;
-volatile uint8_t ui8_overflow_flag=0;
 uint8_t ui8_slowloop_counter=0;
 volatile uint8_t ui8_adc_inj_flag=0;
 volatile uint8_t ui8_adc_regular_flag=0;
@@ -133,7 +132,6 @@ int8_t i8_direction= REVERSE; //for permanent reverse direction
 int8_t i8_reverse_flag = 1; //for temporaribly reverse direction
 
 volatile uint8_t ui8_adc_offset_done_flag=0;
-volatile uint8_t ui8_print_flag=0;
 volatile uint8_t ui8_UART_flag=0;
 volatile uint8_t ui8_Push_Assist_flag=0;
 volatile uint8_t ui8_UART_TxCplt_flag=1;
@@ -154,7 +152,7 @@ uint32_t uint32_PAS_raw=32000;
 uint8_t uint8_pedaling = 0;
 
 q31_t q31_rotorposition_PLL = 0;
-q31_t q31_angle_per_tic = 0;
+q31_t q31_pll_angle_per_tic = 0;
 
 uint8_t ui8_UART_Counter=0;
 int8_t i8_recent_rotor_direction=1;
@@ -243,6 +241,12 @@ int16_t wheel_time = 1000;							//duration of one wheel rotation for speed calc
 int16_t current_display;							//pepared battery current for display
 
 int16_t power;										//recent power output
+
+typedef enum {SIXSTEP = 0, PLL = 1} hall_angle_state_t;
+static hall_angle_state_t enum_hall_angle_state = SIXSTEP;
+
+static q31_t q31_speed_pll_i = 0;
+
 
 /* USER CODE END PV */
 
@@ -698,7 +702,7 @@ int main(void)
 					int32_current_target = 0;
 					if(uint8_pedaling)
 					{
-						int32_temp_current_target = 400;
+						int32_temp_current_target = 150;
 					}
 
 					//limit currest target to max value
@@ -819,21 +823,23 @@ int main(void)
 
 //------------------------------------------------------------------------------------------------------------
 				//enable PWM if power is wanted
-		int32_current_target = 0;  // x
-	  if (int32_current_target>0&&!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE)){
-		  speed_PLL(0,0);//reset integral part
+		int32_current_target = 0;  // xx
+        int32_current_target = DD.go;
+	    if (int32_current_target>0&&!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
+        {
+		    //speed_PLL(0,0);//reset integral part
 
-		  uint16_half_rotation_counter=0;
-		  uint16_full_rotation_counter=0;
+		    uint16_half_rotation_counter=0;
+		    uint16_full_rotation_counter=0;
 		    TIM1->CCR1 = 1023; //set initial PWM values
 		    TIM1->CCR2 = 1023;
 		    TIM1->CCR3 = 1023;
 		    SET_BIT(TIM1->BDTR, TIM_BDTR_MOE);
-		  __HAL_TIM_SET_COUNTER(&htim2,0); //reset tim2 counter
-		  ui16_timertics=20000; //set interval between two hallevents to a large value
-		  i8_recent_rotor_direction=i8_direction*i8_reverse_flag;
-		  get_standstill_position();
-	  }
+		    __HAL_TIM_SET_COUNTER(&htim2,0); //reset tim2 counter
+		    ui16_timertics=20000; //set interval between two hallevents to a large value
+		    i8_recent_rotor_direction=i8_direction*i8_reverse_flag;
+		    get_standstill_position();
+	    }
 
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -883,20 +889,21 @@ int main(void)
 		uint32_t pas_omega = 2285 / uint32_PAS;
 		uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
 		uint16_t pedal_power = pas_omega * torque_nm;
-		//sprintf_(buffer, "%u\n", pedal_power);
+		//sprintf_(buffer, "%u %u\n", pin_state, pedal_power);
+		//sprintf_(buffer, "%u %u\n", READ_BIT(TIM1->BDTR, TIM_BDTR_MOE), DD.go);
+		//sprintf_(buffer, "%d \n", MS.Battery_Current);
 
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
-		  i=0;
-		  while (buffer[i] != '\0')
-		  {i++;}
-		 HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, i);
 
-
-		  ui8_print_flag=0;
-
+        /*if(ui8_UART_TxCplt_flag && DD.log)
+        {
+		    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
+            ui8_UART_TxCplt_flag = 0;
+        }*/
+         
 #endif
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_EBiCS)
@@ -1253,7 +1260,7 @@ static void MX_TIM2_Init(void)
   TIM_MasterConfigTypeDef sMasterConfig;
 
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 128;
+  htim2.Init.Prescaler = 128;                       // counter frequency = 64MHz / 128 = 500 kHz
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim2.Init.Period = 64000;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -1556,37 +1563,54 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 
 	//extrapolate recent rotor position
 	ui16_tim2_recent = __HAL_TIM_GET_COUNTER(&htim2); // read in timertics since last event
-    if(MS.hall_angle_detect_flag){ //if autodetect is not active
-    	//set flag for 6 step at low speed
-		if(ui16_timertics<SIXSTEPTHRESHOLD && ui16_tim2_recent<200)ui8_6step_flag=0;
-		if(ui16_timertics>(SIXSTEPTHRESHOLD*6)>>2)ui8_6step_flag=1;
 
-#ifdef SPEED_PLL
-		   q31_rotorposition_PLL += q31_angle_per_tic;
-#endif
-	   // angle estimation
-	   if (ui16_tim2_recent < ui16_timertics+(ui16_timertics>>2) && !ui8_overflow_flag && !ui8_6step_flag){ //prevent angle running away at standstill
+    if(MS.hall_angle_detect_flag)
+    {   
+        //autodetect is not active
 
-#ifdef SPEED_PLL
-		   // estimation by speed PLL
-			q31_rotorposition_absolute=q31_rotorposition_PLL;
-#else
-			//estimation by extrapolating directly from the hallsensor information
-			q31_rotorposition_absolute = q31_rotorposition_hall + (q31_t)(i16_hall_order * i8_recent_rotor_direction * ((10923 * ui16_tim2_recent)/ui16_timertics)<<16); //interpolate angle between two hallevents by scaling timer2 tics, 10923<<16 is 715827883 = 60°
-#endif
-	   }
-	   else { //run in 6 step mode
-		   ui8_overflow_flag=1;
-		   //start with 60 degree advance angle to have positive torque in any case
-		   if(ui16_timertics>SIXSTEPTHRESHOLD<<1)q31_rotorposition_absolute = q31_rotorposition_hall+REVERSE*(DEG_plus60);
-		   // reduce advance angle to zero with speed increasing to switching speed
-		   else {
-		   		q31_rotorposition_absolute = q31_rotorposition_hall+REVERSE*((((DEG_plus60>>22)*(ui16_timertics-SIXSTEPTHRESHOLD))/SIXSTEPTHRESHOLD)<<22);
-		   		}
+        switch(enum_hall_angle_state)
+        {
+            case SIXSTEP:
+                q31_rotorposition_absolute = q31_rotorposition_hall + (DEG_plus60 >> 1);
 
-	   }
+                // set speed pll integral part
+                q31_speed_pll_i = DEG_plus60 / ui16_timertics;
+                q31_pll_angle_per_tic = q31_speed_pll_i;
+	        
+                if(ui16_timertics < SIXSTEPTHRESHOLD_UP)
+                {
+                    enum_hall_angle_state = PLL;
+                }
+                break;
 
-    }//end if hall angle detect
+            case PLL:
+                q31_rotorposition_absolute += q31_pll_angle_per_tic;
+                q31_rotorposition_PLL = q31_rotorposition_absolute;
+	            
+                // extrapolation method
+                // interpolate angle between two hallevents by scaling timer2 tics, 10923<<16 is 715827883 = 60°
+                // q31_rotorposition_absolute = q31_rotorposition_hall + (q31_t)(i16_hall_order * i8_recent_rotor_direction * ((10923 * ui16_tim2_recent) / ui16_timertics) << 16);
+                
+                if(ui16_timertics > SIXSTEPTHRESHOLD_DOWN)
+                {
+                    enum_hall_angle_state = SIXSTEP;
+                }
+	    
+                if(ui16_tim2_recent > ui16_timertics + (ui16_timertics >> 2))
+                {
+                    // remove this later, should not be necessary
+                    enum_hall_angle_state = SIXSTEP; 
+                }
+
+                break;
+
+            default:
+                break;
+        }
+			
+            
+
+    } //end hall processing
 
 #ifndef DISABLE_DYNAMIC_ADC
 
@@ -1594,17 +1618,19 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 	dyn_adc_state(q31_rotorposition_absolute);
 	//set the according injected channels to read current at Low-Side active time
 
-	if (MS.char_dyn_adc_state!=char_dyn_adc_state_old){
-		set_inj_channel(MS.char_dyn_adc_state);
-		char_dyn_adc_state_old = MS.char_dyn_adc_state;
-		}
+	if (MS.char_dyn_adc_state!=char_dyn_adc_state_old)
+    {
+	    set_inj_channel(MS.char_dyn_adc_state);
+        char_dyn_adc_state_old = MS.char_dyn_adc_state;
+	}
 #endif
 
 	//int16_current_target=0;
 	// call FOC procedure if PWM is enabled
 
-	if (READ_BIT(TIM1->BDTR, TIM_BDTR_MOE)){
-	FOC_calculation(i16_ph1_current, i16_ph2_current, q31_rotorposition_absolute, (((int16_t)i8_direction*i8_reverse_flag)*int32_current_target), &MS);
+	if (READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
+    {
+	    FOC_calculation(i16_ph1_current, i16_ph2_current, q31_rotorposition_absolute, (((int16_t)i8_direction*i8_reverse_flag)*int32_current_target), &MS);
 	}
 	//temp5=__HAL_TIM_GET_COUNTER(&htim1);
 	//set PWM
@@ -1642,11 +1668,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		uint32_tics_filtered-=uint32_tics_filtered>>3;
 		uint32_tics_filtered+=ui16_timertics;
 	   __HAL_TIM_SET_COUNTER(&htim2,0); //reset tim2 counter
-	   ui8_overflow_flag=0;
 	   ui8_SPEED_control_flag=1;
 
 	}
-
+        
 
 
 	switch (ui8_hall_case) //12 cases for each transition from one stage to the next. 6x forward, 6x reverse
@@ -1722,7 +1747,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		} // end case
 
 #ifdef SPEED_PLL
-		q31_angle_per_tic = speed_PLL(q31_rotorposition_PLL,q31_rotorposition_hall);
+        if(enum_hall_angle_state == PLL)
+        {
+		    q31_pll_angle_per_tic = speed_PLL(q31_rotorposition_PLL, q31_rotorposition_hall);
+        }
 
 #endif
 
@@ -2140,7 +2168,9 @@ void get_standstill_position(){
 
 			}
 
-		 q31_rotorposition_absolute = q31_rotorposition_hall;
+		//q31_rotorposition_absolute = q31_rotorposition_hall;
+        // add 30 degrees
+        q31_rotorposition_absolute = q31_rotorposition_hall + (DEG_plus60 >> 1);
 }
 
 int32_t speed_to_tics (uint8_t speed){
@@ -2176,7 +2206,7 @@ void runPIcontrol(){
 		  else{
 			  if(((int32_current_target*MS.u_abs)>>11)*(uint16_t)(CAL_I>>8)>(-REGEN_CURRENT_MAX*7)>>3)ui8_BC_limit_flag=0;
 		  }
-
+    
 		  //control iq
 
 		  //if
@@ -2218,28 +2248,37 @@ void runPIcontrol(){
 				MS.u_q=q31_u_q_temp;
 				MS.u_d=q31_u_d_temp;
 			}
+            
+            if(DD.go)
+            {
+                MS.u_q = DD.ui16_value;
+            }
+            else
+            {
+                MS.u_q = 0;
+            }
+            MS.u_d = 0;
+
 
 		  	PI_flag=0;
 	  }
 
 q31_t speed_PLL (q31_t ist, q31_t soll)
-  {
-    q31_t q31_p;
-    static q31_t q31_d_i = 0;
-    static q31_t q31_d_dc = 0;
-    temp6 = soll-ist;
-    q31_p=(soll - ist)>>P_FACTOR_PLL;   				//7 for Shengyi middrive, 10 for BionX IGH3
-    q31_d_i+=(soll - ist)>>I_FACTOR_PLL;				//11 for Shengyi middrive, 10 for BionX IGH3
+{
+    q31_t q31_speed_pll_p = (soll - ist) >> P_FACTOR_PLL;   				//7 for Shengyi middrive, 10 for BionX IGH3
+    q31_speed_pll_i += (soll - ist) >> I_FACTOR_PLL;				//11 for Shengyi middrive, 10 for BionX IGH3
 
     //clamp i part to twice the theoretical value from hall interrupts
-    if(q31_d_i>((DEG_plus60>>19)*500/ui16_timertics)<<16)q31_d_i=((DEG_plus60>>19)*500/ui16_timertics)<<16;
-    if(q31_d_i<-((DEG_plus60>>19)*500/ui16_timertics)<<16)q31_d_i=-((DEG_plus60>>19)*500/ui16_timertics)<<16;
+    //if(q31_d_i>((DEG_plus60>>19)*500/ui16_timertics)<<16)q31_d_i=((DEG_plus60>>19)*500/ui16_timertics)<<16;
+    //if(q31_d_i<-((DEG_plus60>>19)*500/ui16_timertics)<<16)q31_d_i=-((DEG_plus60>>19)*500/ui16_timertics)<<16;
 
-    if (!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))q31_d_i=0;
+    if (!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
+    {
+        q31_speed_pll_i = 0;
+    }
 
-    q31_d_dc=q31_p+q31_d_i;
-    return (q31_d_dc);
-  }
+    return q31_speed_pll_i + q31_speed_pll_p;
+}
 
 /* USER CODE END 4 */
 

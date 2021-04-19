@@ -68,14 +68,16 @@
 //#define THROTTLE_OVERRIDE
 #define REGEN_CURRENT_MAX 0
 #define SPEED_PLL
-#define P_FACTOR_PLL 11//6
-#define I_FACTOR_PLL 10//11
+#define P_FACTOR_PLL  8 // 8 //  11  //6
+#define I_FACTOR_PLL  9 //9 // 10  //11
 #define AUTODETECT 0
 
 #define EXTERNAL 1
 #define INTERNAL 0
 #define SPEEDSOURCE INTERNAL
 #define SPEEDFILTER 1
-#define SIXSTEPTHRESHOLD 17000
+
+#define SIXSTEPTHRESHOLD_UP 7300            // 5 kmh    
+#define SIXSTEPTHRESHOLD_DOWN 12222         // 3 kmh
 
 #endif /* CONFIG_H_ */
