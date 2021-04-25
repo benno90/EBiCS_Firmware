@@ -80,8 +80,8 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
 
     if(ui8_foc_counter == 31)
     {
-        MS_FOC->i_q = q31_i_d_sum;  //>> 5;
-        MS_FOC->i_d = q31_i_q_sum;  //>> 5;
+        MS_FOC->i_d = q31_i_d_sum;  //>> 5;
+        MS_FOC->i_q = q31_i_q_sum;  //>> 5;
         q31_i_d_sum = 0;
         q31_i_q_sum = 0;
         ui8_foc_counter = 0;
@@ -111,6 +111,9 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
     //{
         //runPIcontrol();
     //}
+	
+    q31_t q31_theta2 = q31_teta + MS_FOC->foc_alpha;
+    arm_sin_cos_q31(q31_theta2, &sinevalue, &cosinevalue);
 
 	//inverse Park transformation
 	arm_inv_park_q31(MS_FOC->u_d, MS_FOC->u_q, &q31_u_alpha, &q31_u_beta, -sinevalue, cosinevalue);

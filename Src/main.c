@@ -193,6 +193,8 @@ const q31_t DEG_plus120= 1431655765; //1442085801
 const q31_t DEG_plus180= 2147483647; //2143375202
 const q31_t DEG_minus60= -715827883; //-704844603
 const q31_t DEG_minus120= -1431655765; //-1400256473
+    
+const q31_t Q31_DEGREE = 11930464;
 
 const q31_t tics_lower_limit = WHEEL_CIRCUMFERENCE*5*3600/(6*GEAR_RATIO*SPEEDLIMIT*10); //tics=wheelcirc*timerfrequency/(no. of hallevents per rev*gear-ratio*speedlimit)*3600/1000000
 const q31_t tics_higher_limit = WHEEL_CIRCUMFERENCE*5*3600/(6*GEAR_RATIO*(SPEEDLIMIT+2)*10);
@@ -307,9 +309,9 @@ static void disable_pwm()
 {
    	CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE);
     // why 1023?
-    TIM1->CCR1 = 1023;
-    TIM1->CCR2 = 1023;
-    TIM1->CCR3 = 1023;
+    //TIM1->CCR1 = 1023;
+    //TIM1->CCR2 = 1023;
+    //TIM1->CCR3 = 1023;
     ui8_pwm_enabled_flag = 0;
 }
 
@@ -367,10 +369,10 @@ int main(void)
   PI_id.gain_i=I_FACTOR_I_D;
   PI_id.gain_p=P_FACTOR_I_D;
   PI_id.setpoint = 0;
-  PI_id.limit_output_max = _U_MAX;
-  PI_id.limit_output_min = -_U_MAX;
+  PI_id.limit_output_max = Q31_DEGREE * 20;
+  PI_id.limit_output_min = -Q31_DEGREE * 20;
   PI_id.max_step=5000;
-  PI_id.shift=10;
+  PI_id.shift=0;
 
   PI_iq.gain_i=I_FACTOR_I_Q;
   PI_iq.gain_p=P_FACTOR_I_Q;
@@ -472,9 +474,10 @@ int main(void)
 #if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
 			DisplayDebug_Init(&DD);
     DD.go = 0;
-    DD.log = 0;
+    DD.log = 1;
     DD.light = 0;
     DD.ui16_value = 0;
+    DD.ui16_value2 = 0;
             
 #endif
 
@@ -2247,6 +2250,8 @@ int16_t external_tics_to_speedx100 (uint32_t tics){
 
 static q31_t get_battery_power()
 {
+    // returns battery_power in [W] x 10
+
     // battery current
     static q31_t battery_current_cumulated = 0;		  
     battery_current_cumulated -= battery_current_cumulated >> 3;
@@ -2257,24 +2262,47 @@ static q31_t get_battery_power()
     
     q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;   // battery voltage in mV
 
-    q31_t battery_power = (battery_current >> 5) * (battery_voltage >> 5);    // battery power in mW, left shift from sampling
-    battery_power = battery_power / 100;      // battery power in W x 10
+    q31_t battery_power_x10 = (battery_current >> 5) * (battery_voltage >> 5);    // battery power in mW, left shift from sampling
+    battery_power_x10 = battery_power_x10 / 100;      // battery power in W x 10
 
-    return battery_power;
+    return battery_power_x10;
 }
 
 static q31_t get_target_power()
 {
     // return requested power in [W] x 10
-    return DD.ui16_value * 10;
+    //return DD.ui16_value * 10;
+
+    if(uint32_PAS < PAS_TIMEOUT)
+    {
+
+        uint32_t PAS_mod = uint32_PAS;
+        if(PAS_mod < PAS_TIMEOUT && PAS_mod > 660)
+        {
+            PAS_mod = 660;  // 30 rpm from the beginning!
+        }
+
+
+        
+        //uint32_t pas_rpm = 21818 / uint32_PAS;
+        //
+        uint32_t pas_omega_x10 = (2285 * (DA.Rx.AssistLevel >> 3)) / uint32_PAS;                // including the assistfactor x10
+    	uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
+    	uint16_t pedal_power_x10 = pas_omega_x10 * torque_nm;
+        return pedal_power_x10;
+    }
+    else
+    {
+        return 0;
+    }
 }
 
 static void limit_target_power(q31_t* target_power)
 {
     // limit power
-    if(*target_power > 5000)
+    if(*target_power > 7000)
     {
-        *target_power = 5000;
+        *target_power = 7000;
     }
 
     // limit current
@@ -2288,21 +2316,26 @@ static void i_q_control()
 {
     static uint8_t i_q_control_state = 0;       // idle
 
-    static uint8_t print_count = 0;
+    static uint32_t print_count = 0;
 
     q31_t battery_power = get_battery_power();
     q31_t target_power = get_target_power();
     limit_target_power(&target_power);
+    //
+    q31_t target_power_75 = target_power * 3 >> 2;
 
-    q31_t u_q_target = DD.go ? DD.ui16_value : 0;
-
+    /* direct u-q control */
+    //q31_t u_q_target = DD.go ? DD.ui16_value : 0;
     static q31_t u_q_temp = 0;
 
-    if(u_q_target == 0 && i_q_control_state > 0)
+    //if(u_q_target == 0 && i_q_control_state > 0)
+    if(target_power == 0 && i_q_control_state > 0)
     {
         // directly ramp down if no power requested
         i_q_control_state = 3;
     }
+
+    // todo: error state -> shut down
 
     if(i_q_control_state == 0)
     {
@@ -2317,8 +2350,8 @@ static void i_q_control()
         }
         //
 
-        //if(target_power != 0)
-        if(u_q_target > 0)
+        //if(u_q_target > 0)
+        if(target_power > 0)
         {
             // transition to ramp-up if power is requested
             enable_pwm();
@@ -2328,31 +2361,41 @@ static void i_q_control()
 
     if(i_q_control_state == 1)
     {
-        /* RAMP-UP */
-        for(uint8_t i = 0; i < 2; ++i)
+        if(battery_power < target_power_75)
         {
-            if(u_q_temp < u_q_target)
+            /* RAMP-UP */
+            for(uint8_t i = 0; i < 2; ++i)
             {
-                ++u_q_temp;
+                //if(u_q_temp < u_q_target)
+                {
+                    ++u_q_temp;
+                }
             }
         }
-
-        if(u_q_temp >= u_q_target)
+        else
         {
-            u_q_temp = u_q_target;
+            /* transition to PI-control */
+
+            PI_iq.integral_part = (target_power_75 << PI_iq.shift) / PI_iq.gain_i;
             i_q_control_state = 2;
         }
+
+        //if(u_q_temp >= u_q_target)
+        //{
+        //    u_q_temp = u_q_target;
+        //    i_q_control_state = 2;
+        //}
     }
 
     if(i_q_control_state == 2)
     {
         /* PI-CONTROL */
 
-        //PI_iq.setpoint = target_power;
-        //PI_iq.recent_value = battery_power;
-        //u_q_temp = PI_control(&PI_iq);
+        PI_iq.setpoint = target_power;
+        PI_iq.recent_value = battery_power;
+        u_q_temp = PI_control(&PI_iq);
 
-        u_q_temp = u_q_target;
+        //u_q_temp = u_q_target;
     }
 
     if(i_q_control_state == 3)
@@ -2389,21 +2432,95 @@ static void i_q_control()
     {
         MS.u_q = 0;
     }*/
-    if(u_q_temp > 800)
+    if(u_q_temp > _U_MAX)
     {
-        u_q_temp = 800;
+        u_q_temp = _U_MAX;
     }
+    if(u_q_temp < 0)
+    {
+        u_q_temp = 0;
+    }
+
     MS.u_q = u_q_temp;
     MS.u_d = 0;
     
-    if(ui8_UART_TxCplt_flag && print_count >= 10)
+    if(ui8_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
     {
-        sprintf_(buffer, "%u %u %d\n", i_q_control_state, ui8_pwm_enabled_flag, u_q_temp);
+        //sprintf_(buffer, "%u %d %d %d\n", i_q_control_state, u_q_temp, battery_power, target_power);
+        //debug_print(buffer, strlen(buffer));
+        //print_count = 0;
+    }
+
+    ++print_count;
+}
+
+static void i_d_control()
+{
+    static uint8_t i_d_control_state = 0;       // idle
+
+    static uint32_t print_count = 0;
+
+    
+
+    q31_t i_d = (MS.i_d >> 5) * 38; // i_d in mA
+    q31_t i_q = (MS.i_q >> 5) * 38;
+
+    q31_t alpha_temp = 0;
+    //alpha_temp = q31_degree * DD.ui16_value2;
+
+    if(i_d_control_state == 0)
+    {
+        PI_id.integral_part = 0;
+        alpha_temp = 0;
+
+        if( (enum_hall_angle_state == PLL) && ui8_pwm_enabled_flag)
+        {
+            i_d_control_state = 1;
+        }
+    }
+
+    if(i_d_control_state == 1)
+    {
+        if( (enum_hall_angle_state == SIXSTEP) || !ui8_pwm_enabled_flag)
+        {
+            i_d_control_state = 0;
+        }
+        else
+        {
+            PI_id.setpoint = 0;
+            PI_id.recent_value = i_d;
+            alpha_temp = PI_control(&PI_id);
+            alpha_temp = -alpha_temp;
+        }
+    }
+    
+
+    q31_t max_alpha =  Q31_DEGREE * 20;
+    q31_t min_alpha =  -Q31_DEGREE * 20;
+
+
+    if(alpha_temp > max_alpha)
+    {
+        alpha_temp = max_alpha;
+    }
+    if(alpha_temp < min_alpha)
+    {
+        alpha_temp = min_alpha;
+    }
+    
+    if(ui8_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
+    {
+        q31_t deg = (alpha_temp * 10) / Q31_DEGREE * 10;
+        sprintf_(buffer, "%d %d %d\n", i_q, i_d, deg);
         debug_print(buffer, strlen(buffer));
         print_count = 0;
     }
 
+    MS.foc_alpha = alpha_temp;
+    MS.u_d = 0;
+
     ++print_count;
+
 }
 
 
@@ -2413,6 +2530,7 @@ void runPIcontrol()
     //else
     {
         i_q_control();
+        i_d_control();
         PI_flag = 0;
     }
 

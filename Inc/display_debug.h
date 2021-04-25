@@ -9,6 +9,7 @@ typedef struct
     uint8_t log;
     uint8_t light;
     uint16_t ui16_value;
+    uint16_t ui16_value2;
 
 } DISPLAY_DEBUG_t;
 

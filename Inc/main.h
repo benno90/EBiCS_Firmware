@@ -120,6 +120,7 @@ typedef struct
 	q31_t          	i_q;
 	q31_t          	u_d;
 	q31_t          	u_q;
+    q31_t           foc_alpha;
 	q31_t          	u_abs;
 	q31_t          	Battery_Current;
 	uint8_t 		hall_angle_detect_flag;
@@ -159,8 +160,8 @@ typedef struct
 {
 	int16_t       	gain_p;
 	int16_t       	gain_i;
-	int16_t       	limit_output_min;
-	int16_t       	limit_output_max;
+	int32_t       	limit_output_min;
+	int32_t       	limit_output_max;
 	int16_t       	recent_value;
 	int32_t       	setpoint;
 	int32_t       	integral_part;

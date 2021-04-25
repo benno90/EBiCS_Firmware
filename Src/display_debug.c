@@ -125,6 +125,17 @@ void DisplayDebug_Service(DISPLAY_DEBUG_t *DD_ctx)
         sprintf_(TxBuff, "ui16_value = %u\n", DD_ctx->ui16_value);
         debug_print2(TxBuff, strlen(TxBuff));
     }
+    else if(strncmp(Buff, "x ", 2) == 0)
+    {
+        // parse value
+        DD_ctx->ui16_value2 = atoi(&Buff[2]);
+        if(DD_ctx->ui16_value2 > 20)
+        {
+            DD_ctx->ui16_value2 = 20;
+        }
+        sprintf_(TxBuff, "ui16_value2 = %u\n", DD_ctx->ui16_value2);
+        debug_print2(TxBuff, strlen(TxBuff));
+    }
     else if(strncmp(Buff, "log", DEBUG_SIZE_RX_DMA_BUFFER) == 0)
     {
         DD_ctx->log = !(DD_ctx->log);
