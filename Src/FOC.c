@@ -20,8 +20,8 @@ q31_t	temp4;
 q31_t	temp5;
 q31_t	temp6;
 
-q31_t q31_i_q_fil = 0;
-q31_t q31_i_d_fil = 0;
+//q31_t q31_i_q_fil = 0;
+//q31_t q31_i_d_fil = 0;
 
 q31_t x1;
 q31_t x2;
@@ -48,6 +48,11 @@ void svpwm(q31_t q31_u_alpha, q31_t q31_u_beta);
 void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int16_t int16_i_q_target, MotorState_t* MS_FOC)
 {
 
+    static uint8_t ui8_foc_counter = 0;
+    static q31_t q31_i_d_sum = 0;
+    static q31_t q31_i_q_sum = 0;
+    
+
 	 q31_t q31_i_alpha = 0;
 	 q31_t q31_i_beta = 0;
 	 q31_t q31_u_alpha = 0;
@@ -70,26 +75,42 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
 	// Park transformation
 	arm_park_q31(q31_i_alpha, q31_i_beta, &q31_i_d, &q31_i_q, sinevalue, cosinevalue);
 
+    q31_i_d_sum += q31_i_d;
+    q31_i_q_sum += q31_i_q;
 
-	q31_i_q_fil -= q31_i_q_fil>>4;
-	q31_i_q_fil += q31_i_q;
-	MS_FOC->i_q=q31_i_q_fil>>4;
+    if(ui8_foc_counter == 31)
+    {
+        MS_FOC->i_q = q31_i_d_sum;  //>> 5;
+        MS_FOC->i_d = q31_i_q_sum;  //>> 5;
+        q31_i_d_sum = 0;
+        q31_i_q_sum = 0;
+        ui8_foc_counter = 0;
+        PI_flag = 1;
+    }
 
-	q31_i_d_fil -= q31_i_d_fil>>4;
-	q31_i_d_fil += q31_i_d;
-	MS_FOC->i_d=q31_i_d_fil>>4;
+
+	//q31_i_q_fil -= q31_i_q_fil>>4;
+	//q31_i_q_fil += q31_i_q;
+	//MS_FOC->i_q=q31_i_q_fil>>4;
+
+	//q31_i_d_fil -= q31_i_d_fil>>4;
+	//q31_i_d_fil += q31_i_d;
+	//MS_FOC->i_d=q31_i_d_fil>>4;
 
 	//Control iq
 
-	PI_flag=1;
+	//PI_flag=1;
 
 
 //set static voltage for hall angle detection
-	if(!MS_FOC->hall_angle_detect_flag){
-		MS_FOC->u_q=0;
-		MS_FOC->u_d=200;
-	}
-	else runPIcontrol();
+	//if(!MS_FOC->hall_angle_detect_flag){
+	//	MS_FOC->u_q=0;
+	//	MS_FOC->u_d=200;
+	//}
+	//else
+    //{
+        //runPIcontrol();
+    //}
 
 	//inverse Park transformation
 	arm_inv_park_q31(MS_FOC->u_d, MS_FOC->u_q, &q31_u_alpha, &q31_u_beta, -sinevalue, cosinevalue);
@@ -127,31 +148,63 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
 	svpwm(q31_u_alpha, q31_u_beta);
 	//temp6=__HAL_TIM_GET_COUNTER(&htim1);
 
+    ++ui8_foc_counter;
+
 }
-//PI Control for quadrature current iq (torque)
+
+
 q31_t PI_control (PI_control_t* PI_c)
 {
 
-  q31_t q31_p; //proportional part
-  q31_p = ((PI_c->setpoint - PI_c->recent_value)*PI_c->gain_p);
-  PI_c->integral_part += ((PI_c->setpoint - PI_c->recent_value)*PI_c->gain_i);
+    // comments:
+    // proportional part is set to zero -> only integral control
+    // the integration stops as soon as the max duty-cylce reached
+
+    // maximum delta to expect (extreme case)
+    // 800W -> delta = 8000
+    // 8000 * I_FACTOR >> shift = 8000 * 20 >> 10 = 156
 
 
-  if (PI_c->integral_part > PI_c->limit_i << PI_c->shift) PI_c->integral_part = PI_c->limit_i << PI_c->shift;
-  if (PI_c->integral_part < -(PI_c->limit_i << PI_c->shift)) PI_c->integral_part = -(PI_c->limit_i << PI_c->shift);
-  if(!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))PI_c->integral_part = 0 ; //reset integral part if PWM is disabled
+    q31_t q31_delta = PI_c->setpoint - PI_c->recent_value;
 
-    //avoid too big steps in one loop run
-  if (q31_p+PI_c->integral_part > PI_c->out+PI_c->max_step) PI_c->out+=PI_c->max_step;
-  else if  (q31_p+PI_c->integral_part < PI_c->out-PI_c->max_step)PI_c->out-=PI_c->max_step;
-  else PI_c->out=(q31_p+PI_c->integral_part);
+    //q31_t q31_p = q31_delta * PI_c->gain_p;
+    q31_t q31_p = 0;
+    q31_t q31_i = PI_c->integral_part * PI_c->gain_i;
 
+    q31_t max_out_shifted = PI_c->limit_output_max << PI_c->shift;
+    q31_t min_out_shifted = PI_c->limit_output_min << PI_c->shift;
 
-  if (PI_c->out>PI_c->limit_output << PI_c->shift) PI_c->out = PI_c->limit_output<< PI_c->shift;
-  if (PI_c->out<-(PI_c->limit_output << PI_c->shift)) PI_c->out = -(PI_c->limit_output<< PI_c->shift); // allow no negative voltage.
-  if(!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))PI_c->out = 0 ; //reset output if PWM is disabled
+    uint8_t integrate = 1;
 
-  return (PI_c->out>>PI_c->shift);
+    q31_t out_shifted = q31_p + q31_i;
+
+    if(out_shifted >= max_out_shifted)
+    {
+        out_shifted = max_out_shifted;
+        if(q31_delta > 0)
+        {
+            // saturation
+            integrate = 0;
+        }
+    }
+
+    if(out_shifted <= min_out_shifted)
+    {
+        out_shifted = min_out_shifted;
+        if(q31_delta < 0)
+        {
+            // saturation
+            integrate = 0;
+        }
+    }
+
+    if(integrate)
+    {
+        PI_c->integral_part += q31_delta;
+    }
+
+    PI_c->out = out_shifted >> PI_c->shift;
+    return PI_c->out;
 }
 
 

@@ -20,7 +20,7 @@
 #define TRIGGER_OFFSET_ADC 50
 #define TRIGGER_DEFAULT 2020
 #define _T 2028
-#define CAL_BAT_V 256
+#define CAL_BAT_V 25          //256
 #define CAL_V 25
 #define CAL_I 38LL<<8
 #define INDUCTANCE 6LL
@@ -32,9 +32,9 @@
 #define BATTERY_LEVEL_3 344000
 #define BATTERY_LEVEL_4 368000
 #define BATTERY_LEVEL_5 380000
-#define P_FACTOR_I_Q 500
+#define P_FACTOR_I_Q 0 //500
 #define I_FACTOR_I_Q 20
-#define P_FACTOR_I_D 500
+#define P_FACTOR_I_D 0 //500
 #define I_FACTOR_I_D 20
 #define P_FACTOR_SPEED 100
 #define I_FACTOR_SPEED 10

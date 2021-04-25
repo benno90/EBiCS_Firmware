@@ -12,8 +12,8 @@ static uint8_t buffer_index1 = 0; // circular buffer read position
 static uint8_t buffer_index2 = 0; // circular buffer write position
 static uint8_t bytes_received = 0;
 static uint8_t RxBuff[DEBUG_SIZE_RX_DMA_BUFFER];
-static uint8_t TxBuff[DEBUG_SIZE_TX_DMA_BUFFER];
-static uint8_t Buff[DEBUG_SIZE_RX_DMA_BUFFER];
+static char TxBuff[DEBUG_SIZE_TX_DMA_BUFFER];
+static char Buff[DEBUG_SIZE_RX_DMA_BUFFER];
 
 static uint8_t do_log = 0;
 
@@ -25,10 +25,10 @@ void DisplayDebug_Init(DISPLAY_DEBUG_t *DD_ctx)
         Error_Handler();
     }
 
-    DD_ctx->go = 0;
-    DD_ctx->log = 0;
-    DD_ctx->light = 0;
-    DD_ctx->ui16_value = 0;
+    //DD_ctx->go = 0;
+    //DD_ctx->log = 0;
+    //DD_ctx->light = 0;
+    //DD_ctx->ui16_value = 0;
 }
 
 void Debug_UART_IdleItCallback(void)
@@ -49,7 +49,7 @@ void Debug_UART_IdleItCallback(void)
     //buffer_index1 = buffer_index2;
 }
 
-void debug_print(uint8_t* data, uint16_t size)
+void debug_print(char* data, uint16_t size)
 {
     if(size >= DEBUG_SIZE_TX_DMA_BUFFER)
     {
@@ -58,12 +58,12 @@ void debug_print(uint8_t* data, uint16_t size)
     
     if(ui8_UART_TxCplt_flag && do_log)
     {
-        HAL_UART_Transmit_DMA(&huart1, data, size);
+        HAL_UART_Transmit_DMA(&huart1, (uint8_t*) data, size);
         ui8_UART_TxCplt_flag = 0;
     }
 }
 
-static void debug_print2(uint8_t* data, uint16_t size)
+static void debug_print2(char* data, uint16_t size)
 {
     if(size >= DEBUG_SIZE_TX_DMA_BUFFER)
     {
@@ -72,7 +72,7 @@ static void debug_print2(uint8_t* data, uint16_t size)
 
     if(ui8_UART_TxCplt_flag)
     {
-        HAL_UART_Transmit_DMA(&huart1, data, size);
+        HAL_UART_Transmit_DMA(&huart1, (uint8_t*) data, size);
         ui8_UART_TxCplt_flag = 0;
     }
 }
@@ -118,9 +118,9 @@ void DisplayDebug_Service(DISPLAY_DEBUG_t *DD_ctx)
     {
         // parse value
         DD_ctx->ui16_value = atoi(&Buff[2]);
-        if(DD_ctx->ui16_value > 600)
+        if(DD_ctx->ui16_value > 800)
         {
-            DD_ctx->ui16_value = 600;
+            DD_ctx->ui16_value = 800;
         }
         sprintf_(TxBuff, "ui16_value = %u\n", DD_ctx->ui16_value);
         debug_print2(TxBuff, strlen(TxBuff));

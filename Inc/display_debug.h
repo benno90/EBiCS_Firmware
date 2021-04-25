@@ -16,4 +16,4 @@ void Debug_UART_IdleItCallback(void);
 void DisplayDebug_Init(DISPLAY_DEBUG_t *DD_ctx);
 void DisplayDebug_Service(DISPLAY_DEBUG_t *DD_ctx);
 
-void debug_print(uint8_t* data, uint16_t size);
+void debug_print(char* data, uint16_t size);

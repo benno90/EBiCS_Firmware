@@ -240,7 +240,6 @@ int16_t battery_percent_fromcapacity = 50; 			//Calculation of used watthours no
 int16_t wheel_time = 1000;							//duration of one wheel rotation for speed calculation
 int16_t current_display;							//pepared battery current for display
 
-int16_t power;										//recent power output
 
 typedef enum {SIXSTEP = 0, PLL = 1} hall_angle_state_t;
 static hall_angle_state_t enum_hall_angle_state = SIXSTEP;
@@ -285,6 +284,34 @@ int8_t tics_to_speed (uint32_t tics);
 int16_t internal_tics_to_speedx100 (uint32_t tics);
 int16_t external_tics_to_speedx100 (uint32_t tics);
 
+
+static uint8_t ui8_pwm_enabled_flag = 0;
+
+static void enable_pwm()
+{
+	uint16_half_rotation_counter=0;
+	uint16_full_rotation_counter=0;
+    // why 1023?
+	TIM1->CCR1 = 1023;
+	TIM1->CCR2 = 1023;
+	TIM1->CCR3 = 1023;
+	SET_BIT(TIM1->BDTR, TIM_BDTR_MOE);
+	__HAL_TIM_SET_COUNTER(&htim2,0); //reset tim2 counter
+	//ui16_timertics=20000; //set interval between two hallevents to a large value
+	//i8_recent_rotor_direction=i8_direction*i8_reverse_flag;
+	//get_standstill_position();
+    ui8_pwm_enabled_flag = 1;
+}
+
+static void disable_pwm()
+{
+   	CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE);
+    // why 1023?
+    TIM1->CCR1 = 1023;
+    TIM1->CCR2 = 1023;
+    TIM1->CCR3 = 1023;
+    ui8_pwm_enabled_flag = 0;
+}
 
 
 /* USER CODE END PFP */
@@ -340,18 +367,18 @@ int main(void)
   PI_id.gain_i=I_FACTOR_I_D;
   PI_id.gain_p=P_FACTOR_I_D;
   PI_id.setpoint = 0;
-  PI_id.limit_output = _U_MAX;
+  PI_id.limit_output_max = _U_MAX;
+  PI_id.limit_output_min = -_U_MAX;
   PI_id.max_step=5000;
   PI_id.shift=10;
-  PI_id.limit_i=1800;
 
   PI_iq.gain_i=I_FACTOR_I_Q;
   PI_iq.gain_p=P_FACTOR_I_Q;
   PI_iq.setpoint = 0;
-  PI_iq.limit_output = _U_MAX;
+  PI_iq.limit_output_max = _U_MAX;
+  PI_iq.limit_output_min = 0;        // currently no regeneration
   PI_iq.max_step=5000;
   PI_iq.shift=10;
-  PI_iq.limit_i=_U_MAX;
 
 #ifdef SPEEDTHROTTLE
 
@@ -444,6 +471,11 @@ int main(void)
 
 #if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
 			DisplayDebug_Init(&DD);
+    DD.go = 0;
+    DD.log = 0;
+    DD.light = 0;
+    DD.ui16_value = 0;
+            
 #endif
 
 #if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
@@ -474,6 +506,8 @@ int main(void)
 
     HAL_Delay(200); //wait for stable conditions
 
+    MS.Voltage = 0;
+
     for(i = 0; i < 32; i++)
 	{
     	while(!ui8_adc_regular_flag){}
@@ -481,6 +515,7 @@ int main(void)
     	ui16_ph2_offset += adcData[3];
     	ui16_ph3_offset += adcData[4];
 		ui16_torque_offset += adcData[TQ_ADC_INDEX];
+        MS.Voltage += adcData[0];
     	ui8_adc_regular_flag = 0;
 
     }
@@ -488,7 +523,7 @@ int main(void)
     ui16_ph2_offset = ui16_ph2_offset >> 5;
     ui16_ph3_offset = ui16_ph3_offset >> 5;
 	ui16_torque_offset = ui16_torque_offset >> 5;
-	ui16_torque_offset += 50; // hardcoded offset -> move to config.h
+	ui16_torque_offset += 30; // hardcoded offset -> move to config.h
 
 
 
@@ -537,6 +572,12 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
+    if(PI_flag || !ui8_pwm_enabled_flag)
+    {
+        // only pi control can enable the pwm
+        runPIcontrol();
+    }
 
 	  //display message processing
 	  if(ui8_UART_flag){
@@ -824,7 +865,8 @@ int main(void)
 //------------------------------------------------------------------------------------------------------------
 				//enable PWM if power is wanted
 		int32_current_target = 0;  // xx
-        int32_current_target = DD.go;
+        //int32_current_target = DD.go;
+        // todo - remove code below
 	    if (int32_current_target>0&&!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
         {
 		    //speed_PLL(0,0);//reset integral part
@@ -847,7 +889,10 @@ int main(void)
 	  if(ui32_tim3_counter>500){
 
 		  MS.Temperature = adcData[6]*41>>8; //0.16 is calibration constant: Analog_in[10mV/°C]/ADC value. Depending on the sensor LM35)
-		  MS.Voltage=adcData[0];
+
+          MS.Voltage -= (MS.Voltage >> 5);
+		  MS.Voltage += adcData[0];
+
 		  if(uint32_SPEED_counter>127999){
 			  MS.Speed =128000;
 #if (SPEEDSOURCE == EXTERNAL)
@@ -870,6 +915,8 @@ int main(void)
 
 
 		  if((uint16_full_rotation_counter>7999||uint16_half_rotation_counter>7999)&&READ_BIT(TIM1->BDTR, TIM_BDTR_MOE)){
+
+              // todo: check if this is still necessary
 			  CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE); //Disable PWM if motor is not turning
 			  uint32_tics_filtered=1000000;
 			  get_standstill_position();
@@ -880,29 +927,31 @@ int main(void)
 		  //print values for debugging
 
 
-		uint8_t pin_state = HAL_GPIO_ReadPin(PAS_GPIO_Port, PAS_Pin);
+		//uint8_t pin_state = HAL_GPIO_ReadPin(PAS_GPIO_Port, PAS_Pin);
 		//sprintf_(buffer, "%u %u\n", uint32_PAS, uint32_PAS_raw); 
 		//sprintf_(buffer, "%u\n", pin_state); 
 		//sprintf_(buffer, "%u\n", ui16_reg_adc_value); 
 		//sprintf_(buffer, "%u %u %u %u %u\n", pin_state, adcData[0], adcData[1], adcData[5], adcData[6]);
 		//uint32_t pas_rpm = 21818 / uint32_PAS;
-		uint32_t pas_omega = 2285 / uint32_PAS;
-		uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
-		uint16_t pedal_power = pas_omega * torque_nm;
+		//uint32_t pas_omega = 2285 / uint32_PAS;
+		//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
+		//uint16_t pedal_power = pas_omega * torque_nm;
+        //q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;
 		//sprintf_(buffer, "%u %u\n", pin_state, pedal_power);
 		//sprintf_(buffer, "%u %u\n", READ_BIT(TIM1->BDTR, TIM_BDTR_MOE), DD.go);
 		//sprintf_(buffer, "%d \n", MS.Battery_Current);
+		//sprintf_(buffer, "%d %u %u\n", battery_voltage, adcData[0] * CAL_BAT_V, adcData[5]);
 
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
 
-        /*if(ui8_UART_TxCplt_flag && DD.log)
-        {
-		    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
-            ui8_UART_TxCplt_flag = 0;
-        }*/
+        //if(ui8_UART_TxCplt_flag && DD.log)
+        //{
+		//    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
+        //    ui8_UART_TxCplt_flag = 0;
+        //}
          
 #endif
 
@@ -1331,7 +1380,8 @@ static void MX_USART1_UART_Init(void)
 #elif (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
   huart1.Init.BaudRate = 1200;
 #else
-  huart1.Init.BaudRate = 115200;
+  //huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 57600;
 #endif
 
 
@@ -1628,16 +1678,21 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 	//int16_current_target=0;
 	// call FOC procedure if PWM is enabled
 
-	if (READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
+    // always do the foc calculation
+	//if (READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
     {
 	    FOC_calculation(i16_ph1_current, i16_ph2_current, q31_rotorposition_absolute, (((int16_t)i8_direction*i8_reverse_flag)*int32_current_target), &MS);
 	}
 	//temp5=__HAL_TIM_GET_COUNTER(&htim1);
 	//set PWM
 
-	TIM1->CCR1 =  (uint16_t) switchtime[0];
-	TIM1->CCR2 =  (uint16_t) switchtime[1];
-	TIM1->CCR3 =  (uint16_t) switchtime[2];
+    // only update switchtimes if pwm is enabled
+    if(ui8_pwm_enabled_flag)
+    {
+	    TIM1->CCR1 =  (uint16_t) switchtime[0];
+	    TIM1->CCR2 =  (uint16_t) switchtime[1];
+	    TIM1->CCR3 =  (uint16_t) switchtime[2];
+    }
 
 
 
@@ -2189,8 +2244,189 @@ int16_t external_tics_to_speedx100 (uint32_t tics){
 	return WHEEL_CIRCUMFERENCE*8*360/(PULSES_PER_REVOLUTION*tics);;
 }
 
-void runPIcontrol(){
 
+static q31_t get_battery_power()
+{
+    // battery current
+    static q31_t battery_current_cumulated = 0;		  
+    battery_current_cumulated -= battery_current_cumulated >> 3;
+    q31_t battery_current = (MS.i_q * MS.u_q * 38) >> 11;
+    battery_current = (battery_current * 3) >> 6; // >> 5 because of sampling (32), >> 1 factor 3/2
+    battery_current_cumulated += battery_current;
+    battery_current = battery_current_cumulated >> 3;  // battery current in mA
+    
+    q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;   // battery voltage in mV
+
+    q31_t battery_power = (battery_current >> 5) * (battery_voltage >> 5);    // battery power in mW, left shift from sampling
+    battery_power = battery_power / 100;      // battery power in W x 10
+
+    return battery_power;
+}
+
+static q31_t get_target_power()
+{
+    // return requested power in [W] x 10
+    return DD.ui16_value * 10;
+}
+
+static void limit_target_power(q31_t* target_power)
+{
+    // limit power
+    if(*target_power > 5000)
+    {
+        *target_power = 5000;
+    }
+
+    // limit current
+
+    // limit velocity
+
+    // limit temperature
+}
+
+static void i_q_control()
+{
+    static uint8_t i_q_control_state = 0;       // idle
+
+    static uint8_t print_count = 0;
+
+    q31_t battery_power = get_battery_power();
+    q31_t target_power = get_target_power();
+    limit_target_power(&target_power);
+
+    q31_t u_q_target = DD.go ? DD.ui16_value : 0;
+
+    static q31_t u_q_temp = 0;
+
+    if(u_q_target == 0 && i_q_control_state > 0)
+    {
+        // directly ramp down if no power requested
+        i_q_control_state = 3;
+    }
+
+    if(i_q_control_state == 0)
+    {
+        /* IDLE STATE */
+
+        u_q_temp = 0;
+
+        PI_iq.integral_part = 0;
+        if(ui8_pwm_enabled_flag)
+        {
+            disable_pwm();
+        }
+        //
+
+        //if(target_power != 0)
+        if(u_q_target > 0)
+        {
+            // transition to ramp-up if power is requested
+            enable_pwm();
+            i_q_control_state = 1; 
+        }
+    }
+
+    if(i_q_control_state == 1)
+    {
+        /* RAMP-UP */
+        for(uint8_t i = 0; i < 2; ++i)
+        {
+            if(u_q_temp < u_q_target)
+            {
+                ++u_q_temp;
+            }
+        }
+
+        if(u_q_temp >= u_q_target)
+        {
+            u_q_temp = u_q_target;
+            i_q_control_state = 2;
+        }
+    }
+
+    if(i_q_control_state == 2)
+    {
+        /* PI-CONTROL */
+
+        //PI_iq.setpoint = target_power;
+        //PI_iq.recent_value = battery_power;
+        //u_q_temp = PI_control(&PI_iq);
+
+        u_q_temp = u_q_target;
+    }
+
+    if(i_q_control_state == 3)
+    {
+
+        /* RAMP-DOWN */
+
+        for(uint8_t i = 0; i < 4; ++i)
+        {
+            if(u_q_temp > 0)
+            {
+                --u_q_temp;
+            }
+        }
+
+        if(u_q_temp == 0)
+        {
+            //MS.u_q = 0;
+            disable_pwm();
+            i_q_control_state = 0;
+        }
+    }
+
+
+
+
+
+    // testing - directly setting duty cycle
+    /*if(DD.go)
+    {
+        MS.u_q = DD.ui16_value;
+    }
+    else
+    {
+        MS.u_q = 0;
+    }*/
+    if(u_q_temp > 800)
+    {
+        u_q_temp = 800;
+    }
+    MS.u_q = u_q_temp;
+    MS.u_d = 0;
+    
+    if(ui8_UART_TxCplt_flag && print_count >= 10)
+    {
+        sprintf_(buffer, "%u %u %d\n", i_q_control_state, ui8_pwm_enabled_flag, u_q_temp);
+        debug_print(buffer, strlen(buffer));
+        print_count = 0;
+    }
+
+    ++print_count;
+}
+
+
+void runPIcontrol()
+{
+    
+    //else
+    {
+        i_q_control();
+        PI_flag = 0;
+    }
+
+    // todo: revise _U_MAX in FOC.h
+    // also: check umax computation in original foc computation
+}
+
+/*void runPIcontrol2(){
+
+    //if(ui8_UART_TxCplt_flag)
+    //{
+    //    sprintf_(buffer, "*%d\n", MS.i_q);
+    //    debug_print(buffer, strlen(buffer));
+    //}
 
 		  q31_t_Battery_Current_accumulated -= q31_t_Battery_Current_accumulated>>8;
 		  q31_t_Battery_Current_accumulated += ((MS.i_q*MS.u_abs)>>11)*(uint16_t)(CAL_I>>8);
@@ -2261,7 +2497,7 @@ void runPIcontrol(){
 
 
 		  	PI_flag=0;
-	  }
+	  }*/
 
 q31_t speed_PLL (q31_t ist, q31_t soll)
 {
