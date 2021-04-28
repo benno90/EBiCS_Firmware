@@ -23,6 +23,7 @@ q31_t PI_control (PI_control_t* PI_c);
 #else
 //#define _U_MAX	2000L
 #define _U_MAX	1800L   // benno: reduced for testing -> increase again later
+//#define _U_MAX	600L   // benno: reduced for testing -> increase again later
 #endif
 
 

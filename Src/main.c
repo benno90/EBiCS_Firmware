@@ -366,20 +366,22 @@ int main(void)
   MP.speedLimit=SPEEDLIMIT;
 
   //init PI structs
+  #define SHIFT_ID 0
   PI_id.gain_i=I_FACTOR_I_D;
   PI_id.gain_p=P_FACTOR_I_D;
   PI_id.setpoint = 0;
-  PI_id.limit_output_max = Q31_DEGREE * 20;
-  PI_id.limit_output_min = -Q31_DEGREE * 20;
-  PI_id.max_step=5000;
+  PI_id.limit_output_max_shifted = Q31_DEGREE * 20 << SHIFT_ID;
+  PI_id.limit_output_min_shifted = -Q31_DEGREE * 20 << SHIFT_ID;
+  PI_id.max_step_shifted=Q31_DEGREE << SHIFT_ID;   // shifted value
   PI_id.shift=0;
 
+  #define SHIFT_IQ 10
   PI_iq.gain_i=I_FACTOR_I_Q;
   PI_iq.gain_p=P_FACTOR_I_Q;
   PI_iq.setpoint = 0;
-  PI_iq.limit_output_max = _U_MAX;
-  PI_iq.limit_output_min = 0;        // currently no regeneration
-  PI_iq.max_step=5000;
+  PI_iq.limit_output_max_shifted = _U_MAX << SHIFT_IQ;
+  PI_iq.limit_output_min_shifted = 0 << SHIFT_IQ;        // currently no regeneration
+  PI_iq.max_step_shifted= 4 << SHIFT_IQ;      // shifted value
   PI_iq.shift=10;
 
 #ifdef SPEEDTHROTTLE
@@ -917,14 +919,14 @@ int main(void)
 #endif
 
 
-		  if((uint16_full_rotation_counter>7999||uint16_half_rotation_counter>7999)&&READ_BIT(TIM1->BDTR, TIM_BDTR_MOE)){
+		  //if((uint16_full_rotation_counter>7999||uint16_half_rotation_counter>7999)&&READ_BIT(TIM1->BDTR, TIM_BDTR_MOE)){
 
               // todo: check if this is still necessary
-			  CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE); //Disable PWM if motor is not turning
-			  uint32_tics_filtered=1000000;
-			  get_standstill_position();
+			  //CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE); //Disable PWM if motor is not turning
+			  //uint32_tics_filtered=1000000;
+			  //get_standstill_position();
 
-		  }
+		  //}
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && !defined(FAST_LOOP_LOG))
 		  //print values for debugging
@@ -2271,10 +2273,29 @@ static q31_t get_battery_power()
 static q31_t get_target_power()
 {
     // return requested power in [W] x 10
-    //return DD.ui16_value * 10;
+   
+    // --------------------------------------------------------
+    // power via UART
+    /*if(DD.go)
+    {
+        return DD.ui16_value * 10;
+    }
+    else
+    {
+        return 0;
+    }*/
+    
+    
+    // --------------------------------------------------------
+    // regular power control
 
     if(uint32_PAS < PAS_TIMEOUT)
     {
+
+
+        //return 1500;
+
+        //return DA.Rx.AssistLevel * 10;
 
         uint32_t PAS_mod = uint32_PAS;
         if(PAS_mod < PAS_TIMEOUT && PAS_mod > 660)
@@ -2287,6 +2308,7 @@ static q31_t get_target_power()
         //uint32_t pas_rpm = 21818 / uint32_PAS;
         //
         uint32_t pas_omega_x10 = (2285 * (DA.Rx.AssistLevel >> 3)) / uint32_PAS;                // including the assistfactor x10
+        //uint32_t pas_omega_x10 = (2285 * (1.0)) / PAS_mod;                // including the assistfactor x10
     	uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
     	uint16_t pedal_power_x10 = pas_omega_x10 * torque_nm;
         return pedal_power_x10;
@@ -2322,18 +2344,10 @@ static void i_q_control()
     q31_t target_power = get_target_power();
     limit_target_power(&target_power);
     //
-    q31_t target_power_75 = target_power * 3 >> 2;
-
+    
     /* direct u-q control */
     //q31_t u_q_target = DD.go ? DD.ui16_value : 0;
     static q31_t u_q_temp = 0;
-
-    //if(u_q_target == 0 && i_q_control_state > 0)
-    if(target_power == 0 && i_q_control_state > 0)
-    {
-        // directly ramp down if no power requested
-        i_q_control_state = 3;
-    }
 
     // todo: error state -> shut down
 
@@ -2350,8 +2364,8 @@ static void i_q_control()
         }
         //
 
-        //if(u_q_target > 0)
         if(target_power > 0)
+        //if(target_power > 0  || (ui16_timertics < SIXSTEPTHRESHOLD_UP))
         {
             // transition to ramp-up if power is requested
             enable_pwm();
@@ -2361,65 +2375,26 @@ static void i_q_control()
 
     if(i_q_control_state == 1)
     {
-        if(battery_power < target_power_75)
-        {
-            /* RAMP-UP */
-            for(uint8_t i = 0; i < 2; ++i)
-            {
-                //if(u_q_temp < u_q_target)
-                {
-                    ++u_q_temp;
-                }
-            }
-        }
-        else
-        {
-            /* transition to PI-control */
-
-            PI_iq.integral_part = (target_power_75 << PI_iq.shift) / PI_iq.gain_i;
-            i_q_control_state = 2;
-        }
-
-        //if(u_q_temp >= u_q_target)
-        //{
-        //    u_q_temp = u_q_target;
-        //    i_q_control_state = 2;
-        //}
-    }
-
-    if(i_q_control_state == 2)
-    {
         /* PI-CONTROL */
 
         PI_iq.setpoint = target_power;
         PI_iq.recent_value = battery_power;
         u_q_temp = PI_control(&PI_iq);
 
+
+        // todo error states
+        if(ui16_timertics > SIXSTEPTHRESHOLD_DOWN)
+        {
+            //i_q_control_state = 0;
+        }
+		
+        if((uint16_full_rotation_counter>7999||uint16_half_rotation_counter>7999))
+        {
+            i_q_control_state = 0;
+		}
+
         //u_q_temp = u_q_target;
     }
-
-    if(i_q_control_state == 3)
-    {
-
-        /* RAMP-DOWN */
-
-        for(uint8_t i = 0; i < 4; ++i)
-        {
-            if(u_q_temp > 0)
-            {
-                --u_q_temp;
-            }
-        }
-
-        if(u_q_temp == 0)
-        {
-            //MS.u_q = 0;
-            disable_pwm();
-            i_q_control_state = 0;
-        }
-    }
-
-
 
 
 
@@ -2445,6 +2420,7 @@ static void i_q_control()
     MS.u_d = 0;
     
     if(ui8_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
+    //if(ui8_UART_TxCplt_flag && (print_count >= 200))
     {
         //sprintf_(buffer, "%u %d %d %d\n", i_q_control_state, u_q_temp, battery_power, target_power);
         //debug_print(buffer, strlen(buffer));
@@ -2510,10 +2486,10 @@ static void i_d_control()
     
     if(ui8_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
     {
-        q31_t deg = (alpha_temp * 10) / Q31_DEGREE * 10;
-        sprintf_(buffer, "%d %d %d\n", i_q, i_d, deg);
-        debug_print(buffer, strlen(buffer));
-        print_count = 0;
+        //q31_t deg = (alpha_temp * 10) / Q31_DEGREE * 10;
+        //sprintf_(buffer, "%d %d %d\n", i_q, i_d, deg);
+        //debug_print(buffer, strlen(buffer));
+        //print_count = 0;
     }
 
     MS.foc_alpha = alpha_temp;
@@ -2531,6 +2507,8 @@ void runPIcontrol()
     {
         i_q_control();
         i_d_control();
+        //MS.foc_alpha = 0;
+        //MS.u_d = 0;
         PI_flag = 0;
     }
 
@@ -2626,10 +2604,10 @@ q31_t speed_PLL (q31_t ist, q31_t soll)
     //if(q31_d_i>((DEG_plus60>>19)*500/ui16_timertics)<<16)q31_d_i=((DEG_plus60>>19)*500/ui16_timertics)<<16;
     //if(q31_d_i<-((DEG_plus60>>19)*500/ui16_timertics)<<16)q31_d_i=-((DEG_plus60>>19)*500/ui16_timertics)<<16;
 
-    if (!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
-    {
-        q31_speed_pll_i = 0;
-    }
+    //if (!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
+    //{
+    //    q31_speed_pll_i = 0;
+    //}
 
     return q31_speed_pll_i + q31_speed_pll_p;
 }

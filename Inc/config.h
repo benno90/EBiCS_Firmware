@@ -33,7 +33,7 @@
 #define BATTERY_LEVEL_4 368000
 #define BATTERY_LEVEL_5 380000
 #define P_FACTOR_I_Q 0 //500
-#define I_FACTOR_I_Q 20
+#define I_FACTOR_I_Q 4 //20
 #define P_FACTOR_I_D 0 //500
 #define I_FACTOR_I_D 4
 #define P_FACTOR_SPEED 100

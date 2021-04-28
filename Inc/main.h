@@ -160,13 +160,13 @@ typedef struct
 {
 	int16_t       	gain_p;
 	int16_t       	gain_i;
-	int32_t       	limit_output_min;
-	int32_t       	limit_output_max;
-	int16_t       	recent_value;
+	int32_t       	limit_output_min_shifted;
+	int32_t       	limit_output_max_shifted;
+	int32_t       	recent_value;
 	int32_t       	setpoint;
 	int32_t       	integral_part;
-	int16_t       	max_step;
-	int32_t       	out;
+	int32_t       	max_step_shifted;
+	int32_t       	out_shifted;
 	int8_t       	shift;
 
 }PI_control_t;

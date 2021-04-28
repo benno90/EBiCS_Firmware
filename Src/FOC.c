@@ -159,31 +159,37 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
 q31_t PI_control (PI_control_t* PI_c)
 {
 
-    // comments:
-    // proportional part is set to zero -> only integral control
-    // the integration stops as soon as the max duty-cylce reached
-
-    // maximum delta to expect (extreme case)
-    // 800W -> delta = 8000
-    // 8000 * I_FACTOR >> shift = 8000 * 20 >> 10 = 156
-
+    // the entire PI control is done with shifted values
+    // only the return value is shifted back
 
     q31_t q31_delta = PI_c->setpoint - PI_c->recent_value;
 
-    //q31_t q31_p = q31_delta * PI_c->gain_p;
-    q31_t q31_p = 0;
+    q31_t q31_p = q31_delta * PI_c->gain_p;
     q31_t q31_i = PI_c->integral_part * PI_c->gain_i;
-
-    q31_t max_out_shifted = PI_c->limit_output_max << PI_c->shift;
-    q31_t min_out_shifted = PI_c->limit_output_min << PI_c->shift;
 
     uint8_t integrate = 1;
 
     q31_t out_shifted = q31_p + q31_i;
 
-    if(out_shifted >= max_out_shifted)
+    // step control
+
+    q31_t step = out_shifted - PI_c->out_shifted;
+    if(step > PI_c->max_step_shifted)
     {
-        out_shifted = max_out_shifted;
+        out_shifted = (PI_c->out_shifted += PI_c->max_step_shifted);
+    }
+    step = -step;
+    if(step > PI_c->max_step_shifted)
+    {
+        out_shifted = (PI_c->out_shifted -= PI_c->max_step_shifted);
+
+    }
+
+    // anti integral windup control
+
+    if(out_shifted >= PI_c->limit_output_max_shifted)
+    {
+        out_shifted = PI_c->limit_output_max_shifted;
         if(q31_delta > 0)
         {
             // saturation
@@ -191,9 +197,9 @@ q31_t PI_control (PI_control_t* PI_c)
         }
     }
 
-    if(out_shifted <= min_out_shifted)
+    if(out_shifted <= PI_c->limit_output_min_shifted)
     {
-        out_shifted = min_out_shifted;
+        out_shifted = PI_c->limit_output_min_shifted;
         if(q31_delta < 0)
         {
             // saturation
@@ -206,8 +212,10 @@ q31_t PI_control (PI_control_t* PI_c)
         PI_c->integral_part += q31_delta;
     }
 
-    PI_c->out = out_shifted >> PI_c->shift;
-    return PI_c->out;
+
+
+    PI_c->out_shifted = out_shifted;
+    return out_shifted >> PI_c->shift;
 }
 
 
