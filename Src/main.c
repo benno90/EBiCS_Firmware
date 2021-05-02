@@ -196,8 +196,9 @@ const q31_t DEG_minus120= -1431655765; //-1400256473
     
 const q31_t Q31_DEGREE = 11930464;
 
-const q31_t tics_lower_limit = WHEEL_CIRCUMFERENCE*5*3600/(6*GEAR_RATIO*SPEEDLIMIT*10); //tics=wheelcirc*timerfrequency/(no. of hallevents per rev*gear-ratio*speedlimit)*3600/1000000
-const q31_t tics_higher_limit = WHEEL_CIRCUMFERENCE*5*3600/(6*GEAR_RATIO*(SPEEDLIMIT+2)*10);
+const uint32_t ui32_wheel_speed_tics_lower_limit  = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * SPEEDLIMIT * 10); //tics=wheelcirc*timerfrequency/(no. of hallevents per rev*gear-ratio*speedlimit)*3600/1000000
+const uint32_t ui32_wheel_speed_tics_higher_limit = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * (SPEEDLIMIT + 3) * 10);
+
 uint32_t uint32_tics_filtered=1000000;
 
 uint16_t VirtAddVarTab[NB_OF_VAR] = {0x01, 0x02, 0x03};
@@ -512,6 +513,7 @@ int main(void)
     HAL_Delay(200); //wait for stable conditions
 
     MS.Voltage = 0;
+    MS.Temperature = 0;
 
     for(i = 0; i < 32; i++)
 	{
@@ -521,6 +523,7 @@ int main(void)
     	ui16_ph3_offset += adcData[4];
 		ui16_torque_offset += adcData[TQ_ADC_INDEX];
         MS.Voltage += adcData[0];
+        MS.Temperature += adcData[TEMP_ADC_INDEX];
     	ui8_adc_regular_flag = 0;
 
     }
@@ -644,8 +647,10 @@ int main(void)
 	  ui8_UART_flag=0;
 	  } // end UART processing
 
-	  //PAS signal processing
-	  //
+
+    // --------------------------------------------------
+	// PAS signal processing
+	//
 	  if(ui8_PAS_flag){
 		  if(uint32_PAS_counter>100){ //debounce
 		  uint32_PAS_cumulated -= uint32_PAS_cumulated>>2;
@@ -682,8 +687,13 @@ int main(void)
 		  uint8_pedaling = 1;
 	  }
 
-	  //SPEED signal processing
-	  if(ui8_SPEED_flag){
+
+    
+    // --------------------------------------------------
+	// SPEED signal processing
+    //
+
+	  if(ui8_SPEED_flag){   // benno: this part seems to be for the external sensor
 
 		  if(uint32_SPEED_counter>200){ //debounce
 		  MS.Speed = uint32_SPEED_counter;
@@ -699,13 +709,17 @@ int main(void)
 		  }
 	  }
 
-	  if(ui8_SPEED_control_flag){
+	if(ui8_SPEED_control_flag)
+    {
 #if (SPEEDSOURCE == INTERNAL)
-		uint32_SPEEDx100_cumulated -=uint32_SPEEDx100_cumulated>>SPEEDFILTER;
-		uint32_SPEEDx100_cumulated +=internal_tics_to_speedx100(uint32_tics_filtered>>3);
+		uint32_SPEEDx100_cumulated -= uint32_SPEEDx100_cumulated >> SPEEDFILTER;
+		uint32_SPEEDx100_cumulated += internal_tics_to_speedx100(uint32_tics_filtered >> 3);
 #endif
 		ui8_SPEED_control_flag=0;
-	  } // end speed processing
+	} // end speed processing
+
+
+//------------------------------------------------------------------------------------------------------------
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && defined(FAST_LOOP_LOG))
 		if(ui8_debug_state==3 && ui8_UART_TxCplt_flag){
@@ -756,8 +770,13 @@ int main(void)
 	  //slow loop procedere @16Hz, for LEV standard every 4th loop run, send page,
 	  if(ui32_tim3_counter>500){
 
-		  MS.Temperature = adcData[6]*41>>8; //0.16 is calibration constant: Analog_in[10mV/°C]/ADC value. Depending on the sensor LM35)
+		  //MS.Temperature = adcData[TEMP_ADC_INDEX]*41>>8; //0.16 is calibration constant: Analog_in[10mV/°C]/ADC value. Depending on the sensor LM35)
 
+          // storing raw adc data
+          MS.Temperature -= (MS.Temperature >> 5);
+          MS.Temperature += adcData[TEMP_ADC_INDEX];
+
+          // storing raw adc data
           MS.Voltage -= (MS.Voltage >> 5);
 		  MS.Voltage += adcData[0];
 
@@ -801,6 +820,8 @@ int main(void)
 		//sprintf_(buffer, "%u\n", ui16_reg_adc_value); 
 		//sprintf_(buffer, "%u %u %u %u %u\n", pin_state, adcData[0], adcData[1], adcData[5], adcData[6]);
 		//uint32_t pas_rpm = 21818 / uint32_PAS;
+        uint32_t velocity_kmh = 37238 / (uint32_tics_filtered>>3);
+        uint32_t temperature = MS.Temperature >> 5;
 		//uint32_t pas_omega = 2285 / uint32_PAS;
 		//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
 		//uint16_t pedal_power = pas_omega * torque_nm;
@@ -808,18 +829,18 @@ int main(void)
 		//sprintf_(buffer, "%u %u\n", pin_state, pedal_power);
 		//sprintf_(buffer, "%u %u\n", READ_BIT(TIM1->BDTR, TIM_BDTR_MOE), DD.go);
 		//sprintf_(buffer, "%d \n", MS.Battery_Current);
-		//sprintf_(buffer, "%d %u %u\n", battery_voltage, adcData[0] * CAL_BAT_V, adcData[5]);
+		sprintf_(buffer, "%u %u %u \n", uint32_SPEEDx100_cumulated >> 2, velocity_kmh, temperature);
 
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
 
-        //if(ui8_UART_TxCplt_flag && DD.log)
-        //{
-		//    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
-        //    ui8_UART_TxCplt_flag = 0;
-        //}
+        if(ui8_UART_TxCplt_flag && DD.log)
+        {
+		    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
+            ui8_UART_TxCplt_flag = 0;
+        }
          
 #endif
 
@@ -2138,18 +2159,21 @@ static q31_t get_battery_power()
 static q31_t get_target_power()
 {
     // return requested power in [W] x 10
-   
+
+#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
     // --------------------------------------------------------
     // power via UART
-    /*if(DD.go)
+    if(DD.go)
     {
         return DD.ui16_value * 10;
     }
     else
     {
         return 0;
-    }*/
-    
+    }
+
+
+#elif DISPLAY_TYPE == DISPLAY_TYPE_AUREUS
     
     // --------------------------------------------------------
     // regular power control
@@ -2182,21 +2206,51 @@ static q31_t get_target_power()
     {
         return 0;
     }
+#endif
+
 }
 
 static void limit_target_power(q31_t* target_power)
 {
+    // ---------------------------------------
     // limit power
     if(*target_power > 7000)
     {
         *target_power = 7000;
     }
 
-    // limit current
+    if(*target_power < 0)
+    {
+        *target_power = 0;
+    }
 
+    // ---------------------------------------
+    // todo: limit current
+
+
+    // ---------------------------------------
     // limit velocity
 
-    // limit temperature
+    uint16_t speed_x10 = (uint32_SPEEDx100_cumulated >> SPEEDFILTER) / 10;
+    uint16_t V2 = SPEEDLIMIT * 10 + 32;  // 482
+    uint16_t V1 = SPEEDLIMIT * 10;       // 450
+
+    if (speed_x10 > V2)
+    {
+        *target_power = 0;
+    }
+    else if(speed_x10 > V1)
+    {
+        *target_power * (V2 - speed_x10) / 32;
+    }
+
+    //if( (uint32_tics_filtered>>3) < ui32_wheel_speed_tics_higher_limit)
+    //{
+    //    *target_power = 0;
+    //}
+
+    // ---------------------------------------
+    // todo: limit temperature
 }
 
 static void i_q_control()
