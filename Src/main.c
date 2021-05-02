@@ -298,7 +298,7 @@ static void enable_pwm()
 	TIM1->CCR2 = 1023;
 	TIM1->CCR3 = 1023;
 	SET_BIT(TIM1->BDTR, TIM_BDTR_MOE);
-	__HAL_TIM_SET_COUNTER(&htim2,0); //reset tim2 counter
+	//__HAL_TIM_SET_COUNTER(&htim2,0); //reset tim2 counter
 	//ui16_timertics=20000; //set interval between two hallevents to a large value
 	//i8_recent_rotor_direction=i8_direction*i8_reverse_flag;
 	//get_standstill_position();
@@ -724,148 +724,11 @@ int main(void)
 		}
 #endif
 
-		//--------------------------------------------------------------------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------------------------------------------------------------
+    
+    //current target calculation (removed 02.05.21)
 
-			  //current target calculation
-				//highest priority: regen by brake lever
-
-
-				if(!HAL_GPIO_ReadPin(Brake_GPIO_Port, Brake_Pin)){
-					if(tics_to_speed(uint32_tics_filtered>>3)>6)int32_current_target=-REGEN_CURRENT; //only apply regen, if motor is turning fast enough
-					else int32_current_target=0;
-				}
-				//next priority: undervoltage protection
-				else if(MS.Voltage<VOLTAGE_MIN)int32_current_target=0;
-				//next priority: push assist
-				else if(ui8_Push_Assist_flag)int32_current_target=PUSHASSIST_CURRENT;
-				// last priority normal ride conditiones
-				else {
-
-		#ifdef TS_MODE //torque-sensor mode
-					//calculate current target form torque, cadence and assist level
-					//int32_temp_current_target = (TS_COEF*(int16_t)(MS.assist_level)* (uint32_torque_cumulated>>5)/uint32_PAS)>>8; //>>5 aus Mittelung über eine Kurbelumdrehung, >>8 aus KM5S-Protokoll Assistlevel 0..255
-
-					int32_current_target = 0;
-					if(uint8_pedaling)
-					{
-						int32_temp_current_target = 150;
-					}
-
-					//limit currest target to max value
-					if(int32_temp_current_target>PH_CURRENT_MAX) int32_temp_current_target = PH_CURRENT_MAX;
-					//set target to zero, if pedals are not turning
-					if(uint32_PAS_counter >= PAS_TIMEOUT){
-						int32_temp_current_target = 0;
-						if(uint32_torque_cumulated>0)uint32_torque_cumulated--; //ramp down cumulated torque value
-					}
-
-
-
-		#else		// torque-simulation mode with throttle override
-
-		#if (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
-			  uint16_mapped_PAS = map(uint32_PAS, RAMP_END, PAS_TIMEOUT, (PH_CURRENT_MAX*(int32_t)(assist_factor[MS.assist_level]))>>8, 0); // level in range 0...5
-		#endif
-
-		#if (DISPLAY_TYPE == DISPLAY_TYPE_KUNTENG)
-			  uint16_mapped_PAS = map(uint32_PAS, RAMP_END, PAS_TIMEOUT, (PH_CURRENT_MAX*(int32_t)(MS.assist_level))/5, 0); // level in range 0...5
-		#endif
-
-		#if (DISPLAY_TYPE == DISPLAY_TYPE_KINGMETER_618U)
-			  uint16_mapped_PAS = map(uint32_PAS, RAMP_END, PAS_TIMEOUT, (PH_CURRENT_MAX*(int32_t)(MS.assist_level-1))>>2, 0); // level in range 1...5
-		#endif
-
-		#if (DISPLAY_TYPE == DISPLAY_TYPE_KINGMETER_901U)
-			  uint16_mapped_PAS = map(uint32_PAS, RAMP_END, PAS_TIMEOUT, ((PH_CURRENT_MAX*(int32_t)(MS.assist_level)))>>8, 0); // level in range 0...255
-		#endif
-
-		#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
-			 uint16_mapped_PAS = map(uint32_PAS, RAMP_END, PAS_TIMEOUT, PH_CURRENT_MAX, 0); // Full amps in debug mode
-		#endif
-
-
-
-		#ifdef DIRDET
-			  if (uint32_PAS_counter< PAS_TIMEOUT){
-				  if ((uint32_PAS_fraction < FRAC_LOW ||uint32_PAS_fraction > FRAC_HIGH)){
-					  uint16_mapped_PAS= 0;//pedals are turning backwards, stop motor
-				  }
-			  }
-			  else uint32_PAS_HIGH_accumulated=uint32_PAS_cumulated;
-		#endif //end direction detection
-
-
-		#endif //end if else TQ sensor mode
-
-#ifdef INDIVIDUAL_MODES
-
-			  int32_temp_current_target = (int32_temp_current_target * ui8_speedfactor)>>8;
-
-#endif
-
-#ifdef THROTTLE_OVERRIDE
-
-				  // read in throttle for throttle override
-				  uint16_mapped_throttle = map(ui16_reg_adc_value, THROTTLE_OFFSET , THROTTLE_MAX, 0, PH_CURRENT_MAX);
-				  //check for throttle override
-				  if(uint16_mapped_PAS>uint16_mapped_throttle)   {
-
-
-
-				    if (uint32_PAS_counter < PAS_TIMEOUT) int32_temp_current_target = uint16_mapped_PAS;		//set current target in torque-simulation-mode, if pedals are turning
-					  else  {
-						  int32_temp_current_target= 0;//pedals are not turning, stop motor
-						  uint32_PAS_cumulated=32000;
-						  uint32_PAS=32000;
-					  }
-
-				  }
-				  else {
-
-#ifdef SPEEDTHROTTLE
-
-					  uint16_mapped_throttle = uint16_mapped_throttle*SPEEDLIMIT/PH_CURRENT_MAX;//throttle override: calulate speed target from thottle
-					  PI_speed.setpoint = uint16_mapped_throttle*100;
-					  PI_speed.recent_value = internal_tics_to_speedx100(uint32_tics_filtered>>3);
-
-					if (internal_tics_to_speedx100(uint32_tics_filtered>>3)<300){//control current slower than 3 km/h
-						PI_speed.limit_i=100;
-						PI_speed.limit_output=100;
-						int32_temp_current_target = PI_control(&PI_speed);
-						if(int32_temp_current_target>100)int32_temp_current_target=100;
-						if(int32_temp_current_target*i8_direction*i8_reverse_flag<0)int32_temp_current_target=0;
-
-					}
-					else{
-
-
-						if(ui8_SPEED_control_flag){//update current target only, if new hall event was detected
-							PI_speed.limit_i=PH_CURRENT_MAX;
-							PI_speed.limit_output=PH_CURRENT_MAX;
-							int32_temp_current_target = PI_control(&PI_speed);
-							ui8_SPEED_control_flag=0;
-							}
-						if(int32_temp_current_target*i8_direction*i8_reverse_flag<0)int32_temp_current_target=0;
-
-						}
-
-
-
-#else
-					int32_temp_current_target=uint16_mapped_throttle;
-
-#endif  //end speedthrottle
-
-				  } //end else of throttle override
-
-#endif //end throttle override
-
-				  //ramp down setpoint at speed limit
-
-
-					int32_current_target=map(uint32_SPEEDx100_cumulated>>SPEEDFILTER, MP.speedLimit*100,(MP.speedLimit+2)*100,int32_temp_current_target,0);
-
-			} //end else for normal riding
+    // code blelow is unused, just left it for reference
 
 //------------------------------------------------------------------------------------------------------------
 				//enable PWM if power is wanted
@@ -1654,6 +1517,8 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
                 if(ui16_tim2_recent > ui16_timertics + (ui16_timertics >> 2))
                 {
                     // remove this later, should not be necessary
+
+                    // TODO - motor blocked flag -> immediately turn off pwm
                     enum_hall_angle_state = SIXSTEP; 
                 }
 
