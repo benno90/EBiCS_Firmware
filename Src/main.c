@@ -109,7 +109,7 @@ uint8_t ui8_hall_state_old=0;
 uint8_t ui8_hall_case =0;
 uint16_t ui16_tim2_recent=0;
 uint16_t ui16_timertics=5000; 					//timertics between two hall events for 60° interpolation
-uint16_t ui16_reg_adc_value;
+uint16_t ui16_reg_adc_value; // torque
 uint32_t ui32_reg_adc_value_filter;
 uint16_t ui16_ph1_offset=0;
 uint16_t ui16_ph2_offset=0;
@@ -651,41 +651,61 @@ int main(void)
     // --------------------------------------------------
 	// PAS signal processing
 	//
-	  if(ui8_PAS_flag){
-		  if(uint32_PAS_counter>100){ //debounce
-		  uint32_PAS_cumulated -= uint32_PAS_cumulated>>2;
-		  uint32_PAS_cumulated += uint32_PAS_counter;
-		  uint32_PAS = uint32_PAS_cumulated>>2;
-		  uint32_PAS_raw = uint32_PAS_counter;
+	  
+    if(ui8_PAS_flag)
+    {
+		if(uint32_PAS_counter>100)
+        { 
+            //debounce
+		    uint32_PAS_cumulated -= uint32_PAS_cumulated>>2;
+		    uint32_PAS_cumulated += uint32_PAS_counter;
+		    uint32_PAS = uint32_PAS_cumulated>>2;
+	        uint32_PAS_raw = uint32_PAS_counter;
 
-		  uint32_PAS_HIGH_accumulated-=uint32_PAS_HIGH_accumulated>>2;
-		  uint32_PAS_HIGH_accumulated+=uint32_PAS_HIGH_counter;
+    	    uint32_PAS_HIGH_accumulated-=uint32_PAS_HIGH_accumulated>>2;
+		    uint32_PAS_HIGH_accumulated+=uint32_PAS_HIGH_counter;
 
-		  uint32_PAS_fraction=(uint32_PAS_HIGH_accumulated>>2)*100/uint32_PAS;
-		  uint32_PAS_HIGH_counter=0;
-		  uint32_PAS_counter =0;
-		  ui8_PAS_flag=0;
-		  //read in and sum up torque-signal within one crank revolution (for sempu sensor 32 PAS pulses/revolution, 2^5=32)
-		  uint32_torque_cumulated -= uint32_torque_cumulated>>5;
-		  if(ui16_reg_adc_value>THROTTLE_OFFSET)uint32_torque_cumulated += (ui16_reg_adc_value-THROTTLE_OFFSET);
-		  }
-	  }
+		    uint32_PAS_fraction=(uint32_PAS_HIGH_accumulated>>2)*100/uint32_PAS;
+		    uint32_PAS_HIGH_counter=0;
+		    uint32_PAS_counter =0;
+		    ui8_PAS_flag=0;
+		    //read in and sum up torque-signal within one crank revolution (for sempu sensor 32 PAS pulses/revolution, 2^5=32)
 
-	  if(uint32_PAS_counter >= PAS_TIMEOUT)
-	  {
-		  uint32_PAS = PAS_TIMEOUT;
-		  uint32_PAS_raw = PAS_TIMEOUT;
-		  uint32_PAS_cumulated = PAS_TIMEOUT << 2;
-	  }
+		    //uint32_torque_cumulated -= uint32_torque_cumulated >> 5;
+            //uint32_torque_cumulated += ui16_reg_adc_value;
 
-	  if(uint32_PAS_raw >= PAS_TIMEOUT)
-	  {
-		  uint8_pedaling = 0;
-	  }
-	  else
-	  {
-		  uint8_pedaling = 1;
-	  }
+            uint32_t ui32_reg_adc_value_shifted = ui16_reg_adc_value << 4;
+
+            if(ui32_reg_adc_value_shifted > uint32_torque_cumulated)
+            {
+                // accept rising values unfiltered
+                uint32_torque_cumulated = ui32_reg_adc_value_shifted;
+            }
+            else
+            {
+                // filter falling values
+		        uint32_torque_cumulated -= uint32_torque_cumulated >> 4;
+                uint32_torque_cumulated += ui16_reg_adc_value;
+            }
+	    }
+    }
+
+	if(uint32_PAS_counter >= PAS_TIMEOUT)
+	{
+	    uint32_PAS = PAS_TIMEOUT;
+		uint32_PAS_raw = PAS_TIMEOUT;
+		uint32_PAS_cumulated = PAS_TIMEOUT << 2;
+		uint32_torque_cumulated = 0;
+	}
+
+	if(uint32_PAS_raw >= PAS_TIMEOUT)
+	{
+	    uint8_pedaling = 0;
+	}
+	else
+	{
+		uint8_pedaling = 1;
+	}
 
 
     
@@ -820,8 +840,8 @@ int main(void)
 		//sprintf_(buffer, "%u\n", ui16_reg_adc_value); 
 		//sprintf_(buffer, "%u %u %u %u %u\n", pin_state, adcData[0], adcData[1], adcData[5], adcData[6]);
 		//uint32_t pas_rpm = 21818 / uint32_PAS;
-        uint32_t velocity_kmh = 37238 / (uint32_tics_filtered>>3);
-        uint32_t temperature = MS.Temperature >> 5;
+        //uint32_t velocity_kmh = 37238 / (uint32_tics_filtered>>3);
+        //uint32_t temperature = MS.Temperature >> 5;
 		//uint32_t pas_omega = 2285 / uint32_PAS;
 		//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
 		//uint16_t pedal_power = pas_omega * torque_nm;
@@ -829,7 +849,8 @@ int main(void)
 		//sprintf_(buffer, "%u %u\n", pin_state, pedal_power);
 		//sprintf_(buffer, "%u %u\n", READ_BIT(TIM1->BDTR, TIM_BDTR_MOE), DD.go);
 		//sprintf_(buffer, "%d \n", MS.Battery_Current);
-		sprintf_(buffer, "%u %u %u \n", uint32_SPEEDx100_cumulated >> 2, velocity_kmh, temperature);
+		//sprintf_(buffer, "%u %u %u \n", uint32_SPEEDx100_cumulated >> 2, velocity_kmh, temperature);
+		sprintf_(buffer, "%u %u \n", ui16_reg_adc_value, uint32_torque_cumulated >> 4);
 
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
@@ -1408,11 +1429,11 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 	if(torque_adc > ui16_torque_offset)
 	{
 		torque_adc = adcData[TQ_ADC_INDEX] - ui16_torque_offset;
-		ui32_reg_adc_value_filter -= ui32_reg_adc_value_filter>>4;
+		ui32_reg_adc_value_filter -= ui32_reg_adc_value_filter >> 5;
 	
 		ui32_reg_adc_value_filter += torque_adc;
 	
-		ui16_reg_adc_value = ui32_reg_adc_value_filter>>4;
+		ui16_reg_adc_value = ui32_reg_adc_value_filter >> 5;
 	}
 	else
 	{
@@ -1523,12 +1544,12 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
                 break;
 
             case PLL:
-                q31_rotorposition_absolute += q31_pll_angle_per_tic;
+                //q31_rotorposition_absolute += q31_pll_angle_per_tic;
                 q31_rotorposition_PLL = q31_rotorposition_absolute;
 	            
                 // extrapolation method
                 // interpolate angle between two hallevents by scaling timer2 tics, 10923<<16 is 715827883 = 60°
-                // q31_rotorposition_absolute = q31_rotorposition_hall + (q31_t)(i16_hall_order * i8_recent_rotor_direction * ((10923 * ui16_tim2_recent) / ui16_timertics) << 16);
+                q31_rotorposition_absolute = q31_rotorposition_hall + (q31_t)(i16_hall_order * i8_recent_rotor_direction * ((10923 * ui16_tim2_recent) / ui16_timertics) << 16);
                 
                 if(ui16_timertics > SIXSTEPTHRESHOLD_DOWN)
                 {
@@ -2198,7 +2219,8 @@ static q31_t get_target_power()
         //
         uint32_t pas_omega_x10 = (2285 * (DA.Rx.AssistLevel >> 3)) / uint32_PAS;                // including the assistfactor x10
         //uint32_t pas_omega_x10 = (2285 * (1.0)) / PAS_mod;                // including the assistfactor x10
-    	uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
+    	//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
+    	uint16_t torque_nm = (uint32_torque_cumulated >> 4) >> 4;
     	uint16_t pedal_power_x10 = pas_omega_x10 * torque_nm;
         return pedal_power_x10;
     }
@@ -2241,7 +2263,7 @@ static void limit_target_power(q31_t* target_power)
     }
     else if(speed_x10 > V1)
     {
-        *target_power * (V2 - speed_x10) / 32;
+        *target_power = *target_power * (V2 - speed_x10) / 32;
     }
 
     //if( (uint32_tics_filtered>>3) < ui32_wheel_speed_tics_higher_limit)
