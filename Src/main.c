@@ -247,6 +247,10 @@ int16_t current_display;							//pepared battery current for display
 typedef enum {SIXSTEP = 0, PLL = 1} hall_angle_state_t;
 static hall_angle_state_t enum_hall_angle_state = SIXSTEP;
 
+typedef enum {NORMAL = 0, BLOCKED = 1} motor_error_state_t;
+static motor_error_state_t enum_motor_error_state = NORMAL;
+static uint16_t ui16_motor_error_state_timeout = 0;
+
 static q31_t q31_speed_pll_i = 0;
 
 
@@ -313,6 +317,7 @@ static void disable_pwm()
     //TIM1->CCR1 = 1023;
     //TIM1->CCR2 = 1023;
     //TIM1->CCR3 = 1023;
+    uint32_tics_filtered=1000000; // set velocity to zero
     ui8_pwm_enabled_flag = 0;
 }
 
@@ -592,7 +597,9 @@ int main(void)
 	  //{
 #if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
 		// period [s] = tics x 6 x GEAR_RATIO / frequency    (frequency = 500kHz)
-		DA.Tx.Wheeltime_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / 500;
+		//DA.Tx.Wheeltime_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / 500;
+        // 05.05.21 -> 20% error ?! -> x 6/5      using 23 /20 = 1.15 
+		DA.Tx.Wheeltime_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO * 6 / (500 * 5);
 		if(DA.Tx.Wheeltime_ms > 0x0DAC)
 		{
 			DA.Tx.Wheeltime_ms = 0x0DAC;
@@ -789,6 +796,17 @@ int main(void)
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
 	  //slow loop procedere @16Hz, for LEV standard every 4th loop run, send page,
 	  if(ui32_tim3_counter>500){
+            
+        // benno 05.05 
+        // motor blocked -> 2s timeout ..
+          if(ui16_motor_error_state_timeout > 0)
+          {
+              --ui16_motor_error_state_timeout;
+          }
+          else
+          {
+              enum_motor_error_state = NORMAL;
+          }
 
 		  //MS.Temperature = adcData[TEMP_ADC_INDEX]*41>>8; //0.16 is calibration constant: Analog_in[10mV/°C]/ADC value. Depending on the sensor LM35)
 
@@ -1523,6 +1541,16 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 
 	//extrapolate recent rotor position
 	ui16_tim2_recent = __HAL_TIM_GET_COUNTER(&htim2); // read in timertics since last event
+                
+    if(ui16_tim2_recent > ui16_timertics + (ui16_timertics >> 2))
+    {
+        disable_pwm();
+        enum_motor_error_state = BLOCKED;
+        ui16_motor_error_state_timeout = 16 * 2;
+
+        // TODO - motor blocked flag -> immediately turn off pwm
+        enum_hall_angle_state = SIXSTEP; 
+    }
 
     if(MS.hall_angle_detect_flag)
     {   
@@ -1544,26 +1572,18 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
                 break;
 
             case PLL:
-                //q31_rotorposition_absolute += q31_pll_angle_per_tic;
+                // PLL
+                q31_rotorposition_absolute += q31_pll_angle_per_tic;
                 q31_rotorposition_PLL = q31_rotorposition_absolute;
 	            
                 // extrapolation method
                 // interpolate angle between two hallevents by scaling timer2 tics, 10923<<16 is 715827883 = 60°
-                q31_rotorposition_absolute = q31_rotorposition_hall + (q31_t)(i16_hall_order * i8_recent_rotor_direction * ((10923 * ui16_tim2_recent) / ui16_timertics) << 16);
+                //q31_rotorposition_absolute = q31_rotorposition_hall + (q31_t)(i16_hall_order * i8_recent_rotor_direction * ((10923 * ui16_tim2_recent) / ui16_timertics) << 16);
                 
                 if(ui16_timertics > SIXSTEPTHRESHOLD_DOWN)
                 {
                     enum_hall_angle_state = SIXSTEP;
                 }
-	    
-                if(ui16_tim2_recent > ui16_timertics + (ui16_timertics >> 2))
-                {
-                    // remove this later, should not be necessary
-
-                    // TODO - motor blocked flag -> immediately turn off pwm
-                    enum_hall_angle_state = SIXSTEP; 
-                }
-
                 break;
 
             default:
@@ -1720,6 +1740,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         }
 
 #endif
+
+        if(i8_recent_rotor_direction == -1)
+        {
+            // set velocity to zero
+            uint32_tics_filtered = 1000000;
+        }
 
 	} //end if
 
@@ -2236,9 +2262,9 @@ static void limit_target_power(q31_t* target_power)
 {
     // ---------------------------------------
     // limit power
-    if(*target_power > 7000)
+    if(*target_power > 8000)
     {
-        *target_power = 7000;
+        *target_power = 8000;
     }
 
     if(*target_power < 0)
@@ -2254,7 +2280,8 @@ static void limit_target_power(q31_t* target_power)
     // limit velocity
 
     uint16_t speed_x10 = (uint32_SPEEDx100_cumulated >> SPEEDFILTER) / 10;
-    uint16_t V2 = SPEEDLIMIT * 10 + 32;  // 482
+    //uint16_t V2 = SPEEDLIMIT * 10 + 32;  // 482
+    uint16_t V2 = SPEEDLIMIT * 10 + 16;   //  466
     uint16_t V1 = SPEEDLIMIT * 10;       // 450
 
     if (speed_x10 > V2)
@@ -2263,7 +2290,8 @@ static void limit_target_power(q31_t* target_power)
     }
     else if(speed_x10 > V1)
     {
-        *target_power = *target_power * (V2 - speed_x10) / 32;
+        //*target_power = *target_power * (V2 - speed_x10) / 32;
+        *target_power = *target_power * (V2 - speed_x10) / 16;
     }
 
     //if( (uint32_tics_filtered>>3) < ui32_wheel_speed_tics_higher_limit)
@@ -2291,6 +2319,10 @@ static void i_q_control()
     static q31_t u_q_temp = 0;
 
     // todo: error state -> shut down
+    if(enum_motor_error_state)
+    {
+        i_q_control_state = 0;
+    }
 
     if(i_q_control_state == 0)
     {
@@ -2308,9 +2340,12 @@ static void i_q_control()
         if(target_power > 0)
         //if(target_power > 0  || (ui16_timertics < SIXSTEPTHRESHOLD_UP))
         {
-            // transition to ramp-up if power is requested
-            enable_pwm();
-            i_q_control_state = 1; 
+            if(!enum_motor_error_state)
+            {
+                // transition to ramp-up if power is requested
+                enable_pwm();
+                i_q_control_state = 1; 
+            }
         }
     }
 
@@ -2384,6 +2419,11 @@ static void i_d_control()
 
     q31_t alpha_temp = 0;
     //alpha_temp = q31_degree * DD.ui16_value2;
+    
+    if(enum_motor_error_state)
+    {
+        i_d_control_state = 0;
+    }
 
     if(i_d_control_state == 0)
     {
@@ -2392,7 +2432,10 @@ static void i_d_control()
 
         if( (enum_hall_angle_state == PLL) && ui8_pwm_enabled_flag)
         {
-            i_d_control_state = 1;
+            if(!enum_motor_error_state)
+            {
+                i_d_control_state = 1;
+            }
         }
     }
 
