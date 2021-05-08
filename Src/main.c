@@ -254,6 +254,7 @@ static uint16_t ui16_motor_error_state_timeout = 0;
 static q31_t q31_speed_pll_i = 0;
 
 
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -811,8 +812,26 @@ int main(void)
 		  //MS.Temperature = adcData[TEMP_ADC_INDEX]*41>>8; //0.16 is calibration constant: Analog_in[10mV/°C]/ADC value. Depending on the sensor LM35)
 
           // storing raw adc data
-          MS.Temperature -= (MS.Temperature >> 5);
-          MS.Temperature += adcData[TEMP_ADC_INDEX];
+          //MS.Temperature -= (MS.Temperature >> 5);
+          //MS.Temperature += adcData[TEMP_ADC_INDEX];
+
+          // data sheet STM32F103x4
+          // 5.3.19 Temperature sensor characteristics
+          // avg voltage at 25 degrees 1.43 V
+          // avg solpe 4.3 mV / degree
+
+          // recover voltage (3.3V  ref voltage, 2^12 = 4096)
+          int32_t v_temp = adcData[TEMP_ADC_INDEX] * 3300 >> 12; // voltage in mV
+          // 
+          v_temp = (1430 - v_temp) * 10 / 43 + 25;
+          if(v_temp > 0)
+          {
+              MS.Temperature = v_temp;
+          }
+          else
+          {
+              MS.Temperature = 0;
+          }
 
           // storing raw adc data
           MS.Voltage -= (MS.Voltage >> 5);
@@ -868,7 +887,8 @@ int main(void)
 		//sprintf_(buffer, "%u %u\n", READ_BIT(TIM1->BDTR, TIM_BDTR_MOE), DD.go);
 		//sprintf_(buffer, "%d \n", MS.Battery_Current);
 		//sprintf_(buffer, "%u %u %u \n", uint32_SPEEDx100_cumulated >> 2, velocity_kmh, temperature);
-		sprintf_(buffer, "%u %u \n", ui16_reg_adc_value, uint32_torque_cumulated >> 4);
+		//sprintf_(buffer, "%u %u \n", ui16_reg_adc_value, uint32_torque_cumulated >> 4);
+		sprintf_(buffer, "%u %u \n", adcData[TEMP_ADC_INDEX], MS.Temperature);
 
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
@@ -993,6 +1013,9 @@ static void MX_ADC1_Init(void)
   ADC_InjectionConfTypeDef sConfigInjected;
   ADC_ChannelConfTypeDef sConfig;
 
+  // enable temperature sensor -> seems not to be necessary
+  //ADC1->CR2 |= ADC_CR2_TSVREFE;
+
     /**Common config 
     */
   hadc1.Instance = ADC1;
@@ -1084,9 +1107,9 @@ _Error_Handler(__FILE__, __LINE__);
 
 /**Configure Regular Channel
 */
-sConfig.Channel = ADC_CHANNEL_8;
-sConfig.Rank = ADC_REGULAR_RANK_6; // connector AD2
-sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;//ADC_SAMPLETIME_239CYCLES_5;
+sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;     //ADC_CHANNEL_8; // connector AD2
+sConfig.Rank = ADC_REGULAR_RANK_6;
+sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
 if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
 {
 _Error_Handler(__FILE__, __LINE__);
