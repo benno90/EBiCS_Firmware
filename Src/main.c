@@ -108,7 +108,8 @@ uint8_t ui8_hall_state=0;
 uint8_t ui8_hall_state_old=0;
 uint8_t ui8_hall_case =0;
 uint16_t ui16_tim2_recent=0;
-uint16_t ui16_timertics=5000; 					//timertics between two hall events for 60° interpolation
+uint16_t ui16_timertics = HALL_TIMEOUT; 					//timertics between two hall events for 60° interpolation
+uint8_t ui8_hall_timeout_flag = 1;
 uint16_t ui16_reg_adc_value; // torque
 uint32_t ui32_reg_adc_value_filter;
 uint16_t ui16_ph1_offset=0;
@@ -199,7 +200,7 @@ const q31_t Q31_DEGREE = 11930464;
 const uint32_t ui32_wheel_speed_tics_lower_limit  = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * SPEEDLIMIT * 10); //tics=wheelcirc*timerfrequency/(no. of hallevents per rev*gear-ratio*speedlimit)*3600/1000000
 const uint32_t ui32_wheel_speed_tics_higher_limit = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * (SPEEDLIMIT + 3) * 10);
 
-uint32_t uint32_tics_filtered=1000000;
+uint32_t uint32_tics_filtered = HALL_TIMEOUT << 3;
 
 uint16_t VirtAddVarTab[NB_OF_VAR] = {0x01, 0x02, 0x03};
 
@@ -237,6 +238,11 @@ MotorParams_t MP;
 PI_control_t PI_iq;
 PI_control_t PI_id;
 PI_control_t PI_speed;
+//
+// PI_control static variables
+static q31_t q31_battery_current_cumulated = 0; // amplitude control
+static q31_t q31_i_d_cumulated = 0;             // angle control
+
 
 
 int16_t battery_percent_fromcapacity = 50; 			//Calculation of used watthours not implemented yet
@@ -244,12 +250,15 @@ int16_t wheel_time = 1000;							//duration of one wheel rotation for speed calc
 int16_t current_display;							//pepared battery current for display
 
 
-typedef enum {SIXSTEP = 0, PLL = 1} hall_angle_state_t;
-static hall_angle_state_t enum_hall_angle_state = SIXSTEP;
+typedef enum {HALL_STATE_SIXSTEP = 0, HALL_STATE_EXTRAPOLATION = 1, HALL_STATE_PLL = 2} hall_angle_state_t;
+static hall_angle_state_t enum_hall_angle_state = HALL_STATE_SIXSTEP;
+static uint8_t ui8_six_step_hall_count = 3;
+static uint8_t ui8_extrapolation_hall_count = 10;
 
-typedef enum {NORMAL = 0, BLOCKED = 1} motor_error_state_t;
-static motor_error_state_t enum_motor_error_state = NORMAL;
-static uint16_t ui16_motor_error_state_timeout = 0;
+typedef enum {MOTOR_STATE_NORMAL = 0, MOTOR_STATE_BLOCKED = 1, MOTOR_STATE_PLL_ERROR = 2} motor_error_state_t;
+static motor_error_state_t enum_motor_error_state = MOTOR_STATE_NORMAL;
+static uint8_t ui8_motor_error_state_hall_count = 0;
+static uint16_t ui16_motor_init_state_timeout = 0;
 
 static q31_t q31_speed_pll_i = 0;
 
@@ -299,26 +308,24 @@ static void enable_pwm()
 {
 	uint16_half_rotation_counter=0;
 	uint16_full_rotation_counter=0;
-    // why 1023?
+    //
 	TIM1->CCR1 = 1023;
 	TIM1->CCR2 = 1023;
 	TIM1->CCR3 = 1023;
-	SET_BIT(TIM1->BDTR, TIM_BDTR_MOE);
-	//__HAL_TIM_SET_COUNTER(&htim2,0); //reset tim2 counter
-	//ui16_timertics=20000; //set interval between two hallevents to a large value
-	//i8_recent_rotor_direction=i8_direction*i8_reverse_flag;
-	//get_standstill_position();
+    //
+    enum_hall_angle_state = HALL_STATE_SIXSTEP;
+    ui8_six_step_hall_count = 3;
     ui8_pwm_enabled_flag = 1;
+    //
+	SET_BIT(TIM1->BDTR, TIM_BDTR_MOE);
 }
 
 static void disable_pwm()
 {
    	CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE);
-    // why 1023?
-    //TIM1->CCR1 = 1023;
-    //TIM1->CCR2 = 1023;
-    //TIM1->CCR3 = 1023;
-    uint32_tics_filtered=1000000; // set velocity to zero
+    //uint32_tics_filtered=1000000; // set velocity to zero
+    enum_hall_angle_state = HALL_STATE_SIXSTEP;
+    ui8_six_step_hall_count = 3;
     ui8_pwm_enabled_flag = 0;
 }
 
@@ -615,6 +622,22 @@ int main(void)
 		{
    		    HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_RESET);
 		}
+
+        switch(enum_motor_error_state)
+        {
+            case MOTOR_STATE_NORMAL:
+                DA.Tx.Error = 0;
+                break;
+            case MOTOR_STATE_BLOCKED:
+                //DA.Tx.Error = 0x21;
+                DA.Tx.Error = 0;
+                break;
+            case MOTOR_STATE_PLL_ERROR:
+                DA.Tx.Error = 0x22;
+                break;
+            default:
+                break;
+        }
   
 		  
 #endif
@@ -797,18 +820,12 @@ int main(void)
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
 	  //slow loop procedere @16Hz, for LEV standard every 4th loop run, send page,
 	  if(ui32_tim3_counter>500){
-            
-        // benno 05.05 
-        // motor blocked -> 2s timeout ..
-          if(ui16_motor_error_state_timeout > 0)
-          {
-              --ui16_motor_error_state_timeout;
-          }
-          else
-          {
-              enum_motor_error_state = NORMAL;
-          }
 
+          if(ui16_motor_init_state_timeout > 0)
+          {
+              --ui16_motor_init_state_timeout;
+          }
+            
 		  //MS.Temperature = adcData[TEMP_ADC_INDEX]*41>>8; //0.16 is calibration constant: Analog_in[10mV/°C]/ADC value. Depending on the sensor LM35)
 
           // storing raw adc data
@@ -888,18 +905,20 @@ int main(void)
 		//sprintf_(buffer, "%d \n", MS.Battery_Current);
 		//sprintf_(buffer, "%u %u %u \n", uint32_SPEEDx100_cumulated >> 2, velocity_kmh, temperature);
 		//sprintf_(buffer, "%u %u \n", ui16_reg_adc_value, uint32_torque_cumulated >> 4);
-		sprintf_(buffer, "%u %u \n", adcData[TEMP_ADC_INDEX], MS.Temperature);
+		//sprintf_(buffer, "%u %u \n", adcData[TEMP_ADC_INDEX], MS.Temperature);
+        //sprintf_(buffer, "%u %u %u\n", velocity_kmh, enum_motor_error_state, enum_hall_angle_state);
+        //sprintf_(buffer, "%d %d %d %d\n", MS.i_q, MS.u_q, MS.i_d, MS.foc_alpha / 11930);   // q31_degree = 11930464
 
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
 
-        if(ui8_UART_TxCplt_flag && DD.log)
-        {
-		    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
-            ui8_UART_TxCplt_flag = 0;
-        }
+        //if(ui8_UART_TxCplt_flag && DD.log)
+        //{
+		//    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
+        //    ui8_UART_TxCplt_flag = 0;
+        //}
          
 #endif
 
@@ -1061,7 +1080,7 @@ static void MX_ADC1_Init(void)
   */
 sConfig.Channel = ADC_CHANNEL_7; //battery voltage
 sConfig.Rank = ADC_REGULAR_RANK_1;
-sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;//ADC_SAMPLETIME_239CYCLES_5;
+sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5 ;//ADC_SAMPLETIME_1CYCLE_5
 if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
 {
   _Error_Handler(__FILE__, __LINE__);
@@ -1262,7 +1281,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 128;                       // counter frequency = 64MHz / 128 = 500 kHz
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 64000;
+  htim2.Init.Period = HALL_TIMEOUT;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -1458,6 +1477,14 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		if(uint16_half_rotation_counter<8000)uint16_half_rotation_counter++;	//half rotation counter for motor standstill detection
 
 	}
+
+    if(htim == &htim2)
+    {
+        // HALL_TIMEOUT
+        ui8_hall_timeout_flag = 1;
+        ui16_timertics = HALL_TIMEOUT;
+        uint32_tics_filtered = HALL_TIMEOUT << 3;
+    }
 }
 
 
@@ -1568,11 +1595,8 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
     if(ui16_tim2_recent > ui16_timertics + (ui16_timertics >> 2))
     {
         disable_pwm();
-        enum_motor_error_state = BLOCKED;
-        ui16_motor_error_state_timeout = 16 * 2;
-
-        // TODO - motor blocked flag -> immediately turn off pwm
-        enum_hall_angle_state = SIXSTEP; 
+        enum_motor_error_state = MOTOR_STATE_BLOCKED;
+        ui8_motor_error_state_hall_count = 10;
     }
 
     if(MS.hall_angle_detect_flag)
@@ -1581,31 +1605,53 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 
         switch(enum_hall_angle_state)
         {
-            case SIXSTEP:
+            case HALL_STATE_SIXSTEP:
                 q31_rotorposition_absolute = q31_rotorposition_hall + (DEG_plus60 >> 1);
+                q31_rotorposition_PLL = q31_rotorposition_hall;
 
                 // set speed pll integral part
                 q31_speed_pll_i = DEG_plus60 / ui16_timertics;
                 q31_pll_angle_per_tic = q31_speed_pll_i;
+
+                ui8_extrapolation_hall_count = 10;
 	        
-                if(ui16_timertics < SIXSTEPTHRESHOLD_UP)
+                if(ui16_timertics < SIXSTEPTHRESHOLD_UP && ui8_six_step_hall_count == 0)
                 {
-                    enum_hall_angle_state = PLL;
+                    enum_hall_angle_state = HALL_STATE_EXTRAPOLATION;
                 }
                 break;
 
-            case PLL:
-                // PLL
-                q31_rotorposition_absolute += q31_pll_angle_per_tic;
-                q31_rotorposition_PLL = q31_rotorposition_absolute;
-	            
+            case HALL_STATE_EXTRAPOLATION:
+                
                 // extrapolation method
                 // interpolate angle between two hallevents by scaling timer2 tics, 10923<<16 is 715827883 = 60°
-                //q31_rotorposition_absolute = q31_rotorposition_hall + (q31_t)(i16_hall_order * i8_recent_rotor_direction * ((10923 * ui16_tim2_recent) / ui16_timertics) << 16);
+                q31_rotorposition_absolute = q31_rotorposition_hall + (q31_t)(i16_hall_order * i8_recent_rotor_direction * ((10923 * ui16_tim2_recent) / ui16_timertics) << 16);
+                // let the pll run in parallel (einschwingen)
+                q31_rotorposition_PLL += q31_pll_angle_per_tic;
+
+                if(ui16_timertics > SIXSTEPTHRESHOLD_DOWN)
+                {
+                    ui8_six_step_hall_count = 3;
+                    enum_hall_angle_state = HALL_STATE_SIXSTEP;
+                }
+
+                if(ui8_extrapolation_hall_count == 0)
+                {
+                    enum_hall_angle_state = HALL_STATE_PLL;
+                }
+
+                break;
+
+            case HALL_STATE_PLL:
+                // PLL
+                q31_rotorposition_PLL += q31_pll_angle_per_tic;
+                q31_rotorposition_absolute = q31_rotorposition_PLL;
+	            
                 
                 if(ui16_timertics > SIXSTEPTHRESHOLD_DOWN)
                 {
-                    enum_hall_angle_state = SIXSTEP;
+                    ui8_six_step_hall_count = 3;
+                    enum_hall_angle_state = HALL_STATE_SIXSTEP;
                 }
                 break;
 
@@ -1662,30 +1708,59 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	//Hall sensor event processing
 	if(GPIO_Pin == GPIO_PIN_0||GPIO_Pin == GPIO_PIN_1||GPIO_Pin == GPIO_PIN_2) //check for right interrupt source
 	{
-	ui8_hall_state = GPIOA->IDR & 0b111; //Mask input register with Hall 1 - 3 bits
-
-
-	ui8_hall_case=ui8_hall_state_old*10+ui8_hall_state;
-	if(MS.hall_angle_detect_flag){ //only process, if autodetect procedere is fininshed
-	ui8_hall_state_old=ui8_hall_state;
-	}
 
 	ui16_tim2_recent = __HAL_TIM_GET_COUNTER(&htim2); // read in timertics since last hall event
 
+    if(ui16_tim2_recent > 100) // debounce -> should affect the entire hall processing, not only part of it!
+    {
+   	    ui8_hall_state = GPIOA->IDR & 0b111; //Mask input register with Hall 1 - 3 bits
 
-	if(ui16_tim2_recent>100){//debounce
-		ui16_timertics = ui16_tim2_recent; //save timertics since last hall event
-		uint32_tics_filtered-=uint32_tics_filtered>>3;
-		uint32_tics_filtered+=ui16_timertics;
-	   __HAL_TIM_SET_COUNTER(&htim2,0); //reset tim2 counter
-	   ui8_SPEED_control_flag=1;
 
-	}
+    	ui8_hall_case=ui8_hall_state_old*10+ui8_hall_state;
+    	if(MS.hall_angle_detect_flag)
+        { 
+            //only process, if autodetect procedere is fininshed
+    	    ui8_hall_state_old=ui8_hall_state;
+    	}
+
+        // TODO - move switch statement here
+        // and only process the event if the direction is forward
+
+        if(ui8_hall_timeout_flag)
+        {
+            // no hall event for a long time @ see HAL_TIM_PeriodElapsedCallback
+            // setting it to tim2_recent is unreliable
+            ui8_hall_timeout_flag = 0;
+    	    __HAL_TIM_SET_COUNTER(&htim2, 0); //reset tim2 counter
+        }
+    	else
+        {
+    		ui16_timertics = ui16_tim2_recent; //save timertics since last hall event
+    		uint32_tics_filtered-=uint32_tics_filtered>>3;
+    		uint32_tics_filtered+=ui16_timertics;
+    	    __HAL_TIM_SET_COUNTER(&htim2,0); //reset tim2 counter
+    	    ui8_SPEED_control_flag=1;
+
+            if(ui8_extrapolation_hall_count > 0) --ui8_extrapolation_hall_count;
+            if(ui8_six_step_hall_count > 0) -- ui8_six_step_hall_count;
+
+            if(ui16_timertics > SIXSTEPTHRESHOLD_UP)
+            {
+                // clear motor error after a certain amount of hall events at low velocity
+                if(ui8_motor_error_state_hall_count > 0) -- ui8_motor_error_state_hall_count;
+                if(ui8_motor_error_state_hall_count == 0) enum_motor_error_state = MOTOR_STATE_NORMAL;
+            }
+    	}
+    
+        //if(ui8_UART_TxCplt_flag)
+        //{
+        //    sprintf_(buffer, "%u %u %u %u\n", ui16_timertics, ui8_motor_error_state_hall_count, enum_motor_error_state, enum_hall_angle_state);
+        //    debug_print(buffer, strlen(buffer));
+        //}
         
 
-
-	switch (ui8_hall_case) //12 cases for each transition from one stage to the next. 6x forward, 6x reverse
-			{
+    	switch (ui8_hall_case) //12 cases for each transition from one stage to the next. 6x forward, 6x reverse
+		{
 		//6 cases for forward direction
 		case 64:
 			q31_rotorposition_hall = DEG_plus120*i16_hall_order + q31_rotorposition_motor_specific;
@@ -1757,7 +1832,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		} // end case
 
 #ifdef SPEED_PLL
-        if(enum_hall_angle_state == PLL)
+        if(enum_hall_angle_state != HALL_STATE_SIXSTEP)
         {
 		    q31_pll_angle_per_tic = speed_PLL(q31_rotorposition_PLL, q31_rotorposition_hall);
         }
@@ -1767,10 +1842,16 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         if(i8_recent_rotor_direction == -1)
         {
             // set velocity to zero
-            uint32_tics_filtered = 1000000;
+            uint32_tics_filtered = HALL_TIMEOUT << 3;
+
+            // XXX - turn of pwm here ?
+            // motor reverse error?
         }
 
-	} //end if
+    } // end if debounce
+
+        
+	} //end if - Hall Sensor Event Processing
 
 	//PAS processing
 	if(GPIO_Pin == PAS_EXTI8_Pin)
@@ -2211,12 +2292,11 @@ static q31_t get_battery_power()
     // returns battery_power in [W] x 10
 
     // battery current
-    static q31_t battery_current_cumulated = 0;		  
-    battery_current_cumulated -= battery_current_cumulated >> 3;
+    q31_battery_current_cumulated -= q31_battery_current_cumulated >> 3;
     q31_t battery_current = (MS.i_q * MS.u_q * 38) >> 11;
     battery_current = (battery_current * 3) >> 6; // >> 5 because of sampling (32), >> 1 factor 3/2
-    battery_current_cumulated += battery_current;
-    battery_current = battery_current_cumulated >> 3;  // battery current in mA
+    q31_battery_current_cumulated += battery_current;
+    battery_current = q31_battery_current_cumulated >> 3;  // battery current in mA
     
     q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;   // battery voltage in mV
 
@@ -2230,20 +2310,19 @@ static q31_t get_target_power()
 {
     // return requested power in [W] x 10
 
-#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
     // --------------------------------------------------------
     // power via UART
-    if(DD.go)
+
+    /*if(DD.go)
     {
         return DD.ui16_value * 10;
     }
     else
     {
         return 0;
-    }
+    }*/
 
 
-#elif DISPLAY_TYPE == DISPLAY_TYPE_AUREUS
     
     // --------------------------------------------------------
     // regular power control
@@ -2267,6 +2346,7 @@ static q31_t get_target_power()
         //uint32_t pas_rpm = 21818 / uint32_PAS;
         //
         uint32_t pas_omega_x10 = (2285 * (DA.Rx.AssistLevel >> 3)) / uint32_PAS;                // including the assistfactor x10
+        //uint32_t pas_omega_x10 = (2285 * (10)) / uint32_PAS;                // including the assistfactor x10
         //uint32_t pas_omega_x10 = (2285 * (1.0)) / PAS_mod;                // including the assistfactor x10
     	//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
     	uint16_t torque_nm = (uint32_torque_cumulated >> 4) >> 4;
@@ -2277,7 +2357,6 @@ static q31_t get_target_power()
     {
         return 0;
     }
-#endif
 
 }
 
@@ -2326,6 +2405,7 @@ static void limit_target_power(q31_t* target_power)
     // todo: limit temperature
 }
 
+// todo rename this function to amplitude control
 static void i_q_control()
 {
     static uint8_t i_q_control_state = 0;       // idle
@@ -2336,12 +2416,8 @@ static void i_q_control()
     q31_t target_power = get_target_power();
     limit_target_power(&target_power);
     //
-    
-    /* direct u-q control */
-    //q31_t u_q_target = DD.go ? DD.ui16_value : 0;
     static q31_t u_q_temp = 0;
 
-    // todo: error state -> shut down
     if(enum_motor_error_state)
     {
         i_q_control_state = 0;
@@ -2354,20 +2430,31 @@ static void i_q_control()
         u_q_temp = 0;
 
         PI_iq.integral_part = 0;
+        q31_battery_current_cumulated = 0;
+        MS.i_q = 0;
+        MS.i_d = 0;
+
         if(ui8_pwm_enabled_flag)
         {
             disable_pwm();
         }
         //
 
-        if(target_power > 0)
+        // enable pwm if power is requested or velocity goes above a certain limit
         //if(target_power > 0  || (ui16_timertics < SIXSTEPTHRESHOLD_UP))
+        if(target_power > 0)
         {
             if(!enum_motor_error_state)
             {
-                // transition to ramp-up if power is requested
-                enable_pwm();
-                i_q_control_state = 1; 
+                if(ui16_timertics > (SIXSTEPTHRESHOLD_UP * 2 / 3))      // do not enable pwm above approx 8 kmh -> leads to uncontrolled regeneration
+                {
+                    enable_pwm();
+                    // i plan to disable the pwm as soon as ui16_timertics > SIXSTEPTHRESHOLD_DOWN
+                    // the timeout gives the motor time to accelerate the bike above this threshold
+                    // otherwise it immediately disables the pwm again 
+                    ui16_motor_init_state_timeout = 16 * 3; // 3s timeout
+                    i_q_control_state = 1; 
+                }
             }
         }
     }
@@ -2381,12 +2468,12 @@ static void i_q_control()
         u_q_temp = PI_control(&PI_iq);
 
 
-        // todo error states
-        if(ui16_timertics > SIXSTEPTHRESHOLD_DOWN)
-        {
-            //i_q_control_state = 0;
-        }
-		
+        //if( ui16_timertics > SIXSTEPTHRESHOLD_DOWN && ui16_motor_init_state_timeout == 0 )
+        //{
+        //    i_q_control_state = 0;
+        //}
+
+
         if((uint16_full_rotation_counter>7999||uint16_half_rotation_counter>7999))
         {
             i_q_control_state = 0;
@@ -2396,16 +2483,6 @@ static void i_q_control()
     }
 
 
-
-    // testing - directly setting duty cycle
-    /*if(DD.go)
-    {
-        MS.u_q = DD.ui16_value;
-    }
-    else
-    {
-        MS.u_q = 0;
-    }*/
     if(u_q_temp > _U_MAX)
     {
         u_q_temp = _U_MAX;
@@ -2418,27 +2495,31 @@ static void i_q_control()
     MS.u_q = u_q_temp;
     MS.u_d = 0;
     
-    if(ui8_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
+    //if(ui8_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
     //if(ui8_UART_TxCplt_flag && (print_count >= 200))
-    {
+    //{
         //sprintf_(buffer, "%u %d %d %d\n", i_q_control_state, u_q_temp, battery_power, target_power);
         //debug_print(buffer, strlen(buffer));
         //print_count = 0;
-    }
+    //}
 
     ++print_count;
 }
 
+// todo: rename this function to angle control
 static void i_d_control()
 {
     static uint8_t i_d_control_state = 0;       // idle
 
     static uint32_t print_count = 0;
 
-    
+
 
     q31_t i_d = (MS.i_d >> 5) * 38; // i_d in mA
-    q31_t i_q = (MS.i_q >> 5) * 38;
+    //q31_t i_q = (MS.i_q >> 5) * 38;
+    
+    q31_i_d_cumulated -= q31_i_d_cumulated >> 3;
+    q31_i_d_cumulated += i_d;
 
     q31_t alpha_temp = 0;
     //alpha_temp = q31_degree * DD.ui16_value2;
@@ -2451,9 +2532,11 @@ static void i_d_control()
     if(i_d_control_state == 0)
     {
         PI_id.integral_part = 0;
+        q31_i_d_cumulated = 0;
+        MS.foc_alpha = 0;
         alpha_temp = 0;
 
-        if( (enum_hall_angle_state == PLL) && ui8_pwm_enabled_flag)
+        if( (enum_hall_angle_state == HALL_STATE_PLL) && ui8_pwm_enabled_flag)
         {
             if(!enum_motor_error_state)
             {
@@ -2464,22 +2547,23 @@ static void i_d_control()
 
     if(i_d_control_state == 1)
     {
-        if( (enum_hall_angle_state == SIXSTEP) || !ui8_pwm_enabled_flag)
+        if( (enum_hall_angle_state == HALL_STATE_SIXSTEP) || !ui8_pwm_enabled_flag)
         {
             i_d_control_state = 0;
         }
         else
         {
             PI_id.setpoint = 0;
-            PI_id.recent_value = i_d;
+            //PI_id.recent_value = i_d;
+            PI_id.recent_value = q31_i_d_cumulated >> 3;
             alpha_temp = PI_control(&PI_id);
             alpha_temp = -alpha_temp;
         }
     }
     
 
-    q31_t max_alpha =  Q31_DEGREE * 20;
-    q31_t min_alpha =  -Q31_DEGREE * 20;
+    q31_t max_alpha =  Q31_DEGREE * 25;
+    q31_t min_alpha =  -Q31_DEGREE * 25;
 
 
     if(alpha_temp > max_alpha)
@@ -2510,17 +2594,35 @@ static void i_d_control()
 void runPIcontrol()
 {
     
-    //else
+    i_q_control();
+    i_d_control();
+    PI_flag = 0;
+    
+    // testing - directly setting duty cycle
+    /*
+    if(DD.go)
     {
-        i_q_control();
-        i_d_control();
-        //MS.foc_alpha = 0;
-        //MS.u_d = 0;
-        PI_flag = 0;
-    }
+        MS.u_q = DD.ui16_value;
+        MS.u_d = 0;
+        MS.foc_alpha = 0;
 
-    // todo: revise _U_MAX in FOC.h
-    // also: check umax computation in original foc computation
+        if(!ui8_pwm_enabled_flag)
+        {
+            enable_pwm();
+        }
+    }
+    else
+    {
+        MS.u_q = 0;
+        MS.u_d = 0;
+        MS.foc_alpha = 0;
+        if(ui8_pwm_enabled_flag)
+        {
+            disable_pwm();
+        }
+    }
+    */
+
 }
 
 /*void runPIcontrol2(){
@@ -2604,17 +2706,30 @@ void runPIcontrol()
 
 q31_t speed_PLL (q31_t ist, q31_t soll)
 {
-    q31_t q31_speed_pll_p = (soll - ist) >> P_FACTOR_PLL;   				//7 for Shengyi middrive, 10 for BionX IGH3
-    q31_speed_pll_i += (soll - ist) >> I_FACTOR_PLL;				//11 for Shengyi middrive, 10 for BionX IGH3
+    q31_t delta = soll - ist;
 
     //clamp i part to twice the theoretical value from hall interrupts
     //if(q31_d_i>((DEG_plus60>>19)*500/ui16_timertics)<<16)q31_d_i=((DEG_plus60>>19)*500/ui16_timertics)<<16;
     //if(q31_d_i<-((DEG_plus60>>19)*500/ui16_timertics)<<16)q31_d_i=-((DEG_plus60>>19)*500/ui16_timertics)<<16;
 
-    //if (!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
-    //{
-    //    q31_speed_pll_i = 0;
-    //}
+
+    q31_t q31_speed_pll_p = delta >> P_FACTOR_PLL;   				//7 for Shengyi middrive, 10 for BionX IGH3
+    q31_speed_pll_i += delta >> I_FACTOR_PLL;				//11 for Shengyi middrive, 10 for BionX IGH3
+
+    if(enum_hall_angle_state == HALL_STATE_PLL)
+    {
+        if(delta < 0) 
+        {
+            delta = -delta;
+        }
+
+        if(delta > (Q31_DEGREE * 25))
+        {
+            disable_pwm();
+            enum_motor_error_state = MOTOR_STATE_PLL_ERROR;
+            ui8_motor_error_state_hall_count = 20;
+        }
+    }
 
     return q31_speed_pll_i + q31_speed_pll_p;
 }

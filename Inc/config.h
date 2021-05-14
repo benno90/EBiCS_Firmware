@@ -34,8 +34,8 @@
 #define BATTERY_LEVEL_5 380000
 #define P_FACTOR_I_Q 10 //500    // 0
 #define I_FACTOR_I_Q 2 //20     // 4
-#define P_FACTOR_I_D 0 //500
-#define I_FACTOR_I_D 4
+#define P_FACTOR_I_D 500 //500
+#define I_FACTOR_I_D 60
 #define P_FACTOR_SPEED 100
 #define I_FACTOR_SPEED 10
 #define TS_COEF 90000
@@ -80,5 +80,6 @@
 
 #define SIXSTEPTHRESHOLD_UP 7300            // 5 kmh    
 #define SIXSTEPTHRESHOLD_DOWN 12222         // 3 kmh
+#define HALL_TIMEOUT 64000                 // 0.58 kmh
 
 #endif /* CONFIG_H_ */

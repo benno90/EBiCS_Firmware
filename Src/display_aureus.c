@@ -154,7 +154,7 @@ void DisplayAureus_Service(DISPLAY_AUREUS_t* DA_ctx)
     //TxBuff[7] = 0xC1;         // wheel cycle time low byte (AC)
     TxBuff[6] = (DA_ctx->Tx.Wheeltime_ms & 0xFF00) >> 8;
     TxBuff[7] = (DA_ctx->Tx.Wheeltime_ms & 0x00FF);
-    TxBuff[8] = 0x0;          // error code
+    TxBuff[8] = DA_ctx->Tx.Error;          // error code
     checksum = TxBuff[1] + TxBuff[2] + TxBuff[3] + TxBuff[4] + TxBuff[5] + TxBuff[6] + TxBuff[7] + TxBuff[8];
     TxBuff[9] = checksum & 0xFF;
     TxBuff[10] = (checksum & 0xFF00) >> 8;
