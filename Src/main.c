@@ -261,6 +261,7 @@ static uint8_t ui8_motor_error_state_hall_count = 0;
 static uint16_t ui16_motor_init_state_timeout = 0;
 
 static q31_t q31_speed_pll_i = 0;
+static q31_t q31_pll_abs_delta = Q31_DEGREE * 60;
 
 
 
@@ -1637,7 +1638,14 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 
                 if(ui8_extrapolation_hall_count == 0)
                 {
-                    enum_hall_angle_state = HALL_STATE_PLL;
+                    if(q31_pll_abs_delta < Q31_DEGREE * 10)
+                    {
+                        enum_hall_angle_state = HALL_STATE_PLL;
+                    }
+                    else
+                    {
+                        ui8_extrapolation_hall_count = 10;
+                    }
                 }
 
                 break;
@@ -1754,7 +1762,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     
         //if(ui8_UART_TxCplt_flag)
         //{
-        //    sprintf_(buffer, "%u %u %u %u\n", ui16_timertics, ui8_motor_error_state_hall_count, enum_motor_error_state, enum_hall_angle_state);
+        //    sprintf_(buffer, "%u %d\n", enum_hall_angle_state, q31_pll_abs_delta / 1193046);    // 11930464
         //    debug_print(buffer, strlen(buffer));
         //}
         
@@ -2441,8 +2449,8 @@ static void i_q_control()
         //
 
         // enable pwm if power is requested or velocity goes above a certain limit
-        //if(target_power > 0  || (ui16_timertics < SIXSTEPTHRESHOLD_UP))
-        if(target_power > 0)
+        //if(target_power > 0)
+        if(target_power > 0  || (ui16_timertics < SIXSTEPTHRESHOLD_UP))
         {
             if(!enum_motor_error_state)
             {
@@ -2463,15 +2471,21 @@ static void i_q_control()
     {
         /* PI-CONTROL */
 
+        if(target_power < 200)
+        {
+            // minimum of 20W assist, just to make sure the motor does not slow down the ride
+            target_power = 200;
+        }
+
         PI_iq.setpoint = target_power;
         PI_iq.recent_value = battery_power;
         u_q_temp = PI_control(&PI_iq);
 
 
-        //if( ui16_timertics > SIXSTEPTHRESHOLD_DOWN && ui16_motor_init_state_timeout == 0 )
-        //{
-        //    i_q_control_state = 0;
-        //}
+        if( ui16_timertics > SIXSTEPTHRESHOLD_DOWN && ui16_motor_init_state_timeout == 0 )
+        {
+            i_q_control_state = 0;
+        }
 
 
         if((uint16_full_rotation_counter>7999||uint16_half_rotation_counter>7999))
@@ -2715,19 +2729,29 @@ q31_t speed_PLL (q31_t ist, q31_t soll)
 
     q31_t q31_speed_pll_p = delta >> P_FACTOR_PLL;   				//7 for Shengyi middrive, 10 for BionX IGH3
     q31_speed_pll_i += delta >> I_FACTOR_PLL;				//11 for Shengyi middrive, 10 for BionX IGH3
+        
+    if(delta < 0) 
+    {
+        q31_pll_abs_delta = -delta;
+    }
+    else
+    {
+        q31_pll_abs_delta = delta;
+    }
 
     if(enum_hall_angle_state == HALL_STATE_PLL)
     {
-        if(delta < 0) 
+        if(q31_pll_abs_delta > (Q31_DEGREE * 25))
         {
-            delta = -delta;
-        }
+            // ERROR
+            //disable_pwm();
+            //enum_motor_error_state = MOTOR_STATE_PLL_ERROR;
+            //ui8_motor_error_state_hall_count = 20;
 
-        if(delta > (Q31_DEGREE * 25))
-        {
-            disable_pwm();
-            enum_motor_error_state = MOTOR_STATE_PLL_ERROR;
-            ui8_motor_error_state_hall_count = 20;
+            // PLL seems to be in trouble
+            // fallback to extraploation
+            ui8_extrapolation_hall_count = 20;
+            enum_hall_angle_state = HALL_STATE_EXTRAPOLATION;
         }
     }
 
