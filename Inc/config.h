@@ -20,9 +20,9 @@
 #define TRIGGER_OFFSET_ADC 50
 #define TRIGGER_DEFAULT 2020
 #define _T 2028
-#define CAL_BAT_V 25          //256
-#define CAL_V 25
-#define CAL_I 38LL<<8
+#define CAL_BAT_V 25   
+#define CAL_V 25     // adcData[0] * CAL_V = voltage in mV
+#define CAL_I 55      //38       
 #define INDUCTANCE 6LL
 #define RESISTANCE 40LL
 #define FLUX_LINKAGE 1200LL
@@ -47,8 +47,8 @@
 #define GEAR_RATIO 18 //dummy for testing
 #define SPEEDLIMIT 45
 #define PULSES_PER_REVOLUTION 1
-#define PH_CURRENT_MAX 900
-#define BATTERYCURRENT_MAX 15000
+#define PH_CURRENT_MAX 350          // in ampere x 10
+#define BATTERYCURRENT_MAX 180      // im ampere x 10
 #define SPEC_ANGLE -167026406L //BionX IGH3 -143165476
 //#define DIRDET
 #define FRAC_HIGH 30

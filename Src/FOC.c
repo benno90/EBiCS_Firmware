@@ -78,6 +78,10 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
     q31_i_d_sum += q31_i_d;
     q31_i_q_sum += q31_i_q;
 
+    // functions that have to be changed if == 31 changes:
+    // get_battery_power
+    // i_d_control
+
     if(ui8_foc_counter == 31)
     {
         MS_FOC->i_d = q31_i_d_sum;  //>> 5;

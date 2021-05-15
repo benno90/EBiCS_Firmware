@@ -104,6 +104,8 @@ DMA_HandleTypeDef hdma_usart1_rx;
 
 uint32_t ui32_tim1_counter=0;
 uint32_t ui32_tim3_counter=0;
+static uint8_t slow_loop_counter = 0;
+
 uint8_t ui8_hall_state=0;
 uint8_t ui8_hall_state_old=0;
 uint8_t ui8_hall_case =0;
@@ -168,7 +170,7 @@ uint16_t uint16_full_rotation_counter=0;
 int32_t int32_current_target=0;
 int32_t int32_temp_current_target=0;
 
-q31_t q31_t_Battery_Current_accumulated=0;
+//q31_t q31_t_Battery_Current_accumulated=0;
 
 q31_t q31_rotorposition_absolute;
 q31_t q31_rotorposition_hall;
@@ -233,6 +235,9 @@ uint8_t ui8_LEV_Page_to_send=1;
 
 MotorState_t MS;
 MotorParams_t MP;
+CurrentData_t CurrentData;
+BatteryVoltageData_t BatteryVoltageData;
+TemperatureData_t TemperatureData;
 
 //structs for PI_control
 PI_control_t PI_iq;
@@ -240,7 +245,6 @@ PI_control_t PI_id;
 PI_control_t PI_speed;
 //
 // PI_control static variables
-static q31_t q31_battery_current_cumulated = 0; // amplitude control
 static q31_t q31_i_d_cumulated = 0;             // angle control
 
 
@@ -379,6 +383,13 @@ int main(void)
   MP.pulses_per_revolution = PULSES_PER_REVOLUTION;
   MP.wheel_cirumference = WHEEL_CIRCUMFERENCE;
   MP.speedLimit=SPEEDLIMIT;
+
+  // 
+  BatteryVoltageData.ui8_shift = 5;
+  TemperatureData.ui8_shift = 5;
+  CurrentData.ui8_battery_current_shift = 3;
+  CurrentData.q31_battery_current_mA = 0;
+  CurrentData.q31_battery_current_mA_cumulated = 0;
 
   //init PI structs
   #define SHIFT_ID 0
@@ -526,9 +537,9 @@ int main(void)
 
     HAL_Delay(200); //wait for stable conditions
 
-    MS.Voltage = 0;
-    MS.Temperature = 0;
-
+    BatteryVoltageData.q31_battery_voltage_adc_cumulated = 0;
+    TemperatureData.q31_temperature_adc_cumulated = 0;
+    
     for(i = 0; i < 32; i++)
 	{
     	while(!ui8_adc_regular_flag){}
@@ -536,8 +547,8 @@ int main(void)
     	ui16_ph2_offset += adcData[3];
     	ui16_ph3_offset += adcData[4];
 		ui16_torque_offset += adcData[TQ_ADC_INDEX];
-        MS.Voltage += adcData[0];
-        MS.Temperature += adcData[TEMP_ADC_INDEX];
+        BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
+        TemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
     	ui8_adc_regular_flag = 0;
 
     }
@@ -547,6 +558,15 @@ int main(void)
 	ui16_torque_offset = ui16_torque_offset >> 5;
 	ui16_torque_offset += 30; // hardcoded offset -> move to config.h
 
+    BatteryVoltageData.q31_battery_voltage_adc_cumulated = 
+        (BatteryVoltageData.q31_battery_voltage_adc_cumulated >> 5) << BatteryVoltageData.ui8_shift;
+
+    BatteryVoltageData.q31_battery_voltage_V_x10 = 
+        (BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> BatteryVoltageData.ui8_shift;
+
+    TemperatureData.q31_temperature_adc_cumulated = 
+        (TemperatureData.q31_temperature_adc_cumulated >> 5) << TemperatureData.ui8_shift;
+    TemperatureData.q31_temperature_degrees = 0; // setting it in the slow loop
 
 
    	ui8_adc_offset_done_flag = 1;
@@ -630,8 +650,8 @@ int main(void)
                 DA.Tx.Error = 0;
                 break;
             case MOTOR_STATE_BLOCKED:
-                //DA.Tx.Error = 0x21;
-                DA.Tx.Error = 0;
+                DA.Tx.Error = 0x21;
+                //DA.Tx.Error = 0;
                 break;
             case MOTOR_STATE_PLL_ERROR:
                 DA.Tx.Error = 0x22;
@@ -826,34 +846,55 @@ int main(void)
           {
               --ui16_motor_init_state_timeout;
           }
+
+            if(slow_loop_counter == 0)
+            {
+                // 1Hz process frequency for battery voltage and chip temperature
+                // storing raw adc data
+
+
+                // ---------------------------------------
+                // process battery voltage
+                BatteryVoltageData.q31_battery_voltage_adc_cumulated -= (BatteryVoltageData.q31_battery_voltage_adc_cumulated >> BatteryVoltageData.ui8_shift);
+                BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
+                BatteryVoltageData.q31_battery_voltage_V_x10 = 
+                    (BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> BatteryVoltageData.ui8_shift;
+          
+          
+
+                // ---------------------------------------
+                // process temperature
+                
+                TemperatureData.q31_temperature_adc_cumulated -= (TemperatureData.q31_temperature_adc_cumulated >> TemperatureData.ui8_shift);
+                TemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
+
+                // data sheet STM32F103x4
+                // 5.3.19 Temperature sensor characteristics
+                // avg voltage at 25 degrees 1.43 V
+                // avg solpe 4.3 mV / degree
+
+                // recover voltage (3.3V  ref voltage, 2^12 = 4096)
+                // int32_t v_temp = adcData[TEMP_ADC_INDEX] * 3300 >> 12; // voltage in mV
+                int32_t v_temp = (TemperatureData.q31_temperature_adc_cumulated >> TemperatureData.ui8_shift) * 3300 >> 12;   // voltage in mV
+                // 
+                v_temp = (1430 - v_temp) * 10 / 43 + 25;
+                if(v_temp > 0)
+                {
+                    TemperatureData.q31_temperature_degrees = v_temp;
+                }
+                else
+                {
+                    TemperatureData.q31_temperature_degrees = 0;
+                }
+
+            }
+            else
+            {
+                slow_loop_counter = 16;
+            }
             
-		  //MS.Temperature = adcData[TEMP_ADC_INDEX]*41>>8; //0.16 is calibration constant: Analog_in[10mV/°C]/ADC value. Depending on the sensor LM35)
 
-          // storing raw adc data
-          //MS.Temperature -= (MS.Temperature >> 5);
-          //MS.Temperature += adcData[TEMP_ADC_INDEX];
 
-          // data sheet STM32F103x4
-          // 5.3.19 Temperature sensor characteristics
-          // avg voltage at 25 degrees 1.43 V
-          // avg solpe 4.3 mV / degree
-
-          // recover voltage (3.3V  ref voltage, 2^12 = 4096)
-          int32_t v_temp = adcData[TEMP_ADC_INDEX] * 3300 >> 12; // voltage in mV
-          // 
-          v_temp = (1430 - v_temp) * 10 / 43 + 25;
-          if(v_temp > 0)
-          {
-              MS.Temperature = v_temp;
-          }
-          else
-          {
-              MS.Temperature = 0;
-          }
-
-          // storing raw adc data
-          MS.Voltage -= (MS.Voltage >> 5);
-		  MS.Voltage += adcData[0];
 
 		  if(uint32_SPEED_counter>127999){
 			  MS.Speed =128000;
@@ -889,37 +930,26 @@ int main(void)
 		  //print values for debugging
 
 
-		//uint8_t pin_state = HAL_GPIO_ReadPin(PAS_GPIO_Port, PAS_Pin);
-		//sprintf_(buffer, "%u %u\n", uint32_PAS, uint32_PAS_raw); 
-		//sprintf_(buffer, "%u\n", pin_state); 
-		//sprintf_(buffer, "%u\n", ui16_reg_adc_value); 
-		//sprintf_(buffer, "%u %u %u %u %u\n", pin_state, adcData[0], adcData[1], adcData[5], adcData[6]);
-		//uint32_t pas_rpm = 21818 / uint32_PAS;
-        //uint32_t velocity_kmh = 37238 / (uint32_tics_filtered>>3);
-        //uint32_t temperature = MS.Temperature >> 5;
 		//uint32_t pas_omega = 2285 / uint32_PAS;
 		//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
 		//uint16_t pedal_power = pas_omega * torque_nm;
-        //q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;
-		//sprintf_(buffer, "%u %u\n", pin_state, pedal_power);
-		//sprintf_(buffer, "%u %u\n", READ_BIT(TIM1->BDTR, TIM_BDTR_MOE), DD.go);
-		//sprintf_(buffer, "%d \n", MS.Battery_Current);
-		//sprintf_(buffer, "%u %u %u \n", uint32_SPEEDx100_cumulated >> 2, velocity_kmh, temperature);
-		//sprintf_(buffer, "%u %u \n", ui16_reg_adc_value, uint32_torque_cumulated >> 4);
-		//sprintf_(buffer, "%u %u \n", adcData[TEMP_ADC_INDEX], MS.Temperature);
-        //sprintf_(buffer, "%u %u %u\n", velocity_kmh, enum_motor_error_state, enum_hall_angle_state);
-        //sprintf_(buffer, "%d %d %d %d\n", MS.i_q, MS.u_q, MS.i_d, MS.foc_alpha / 11930);   // q31_degree = 11930464
+        sprintf_(buffer, "%d %d\n", BatteryVoltageData.q31_battery_voltage_V_x10, TemperatureData.q31_temperature_degrees);
+
+        //q31_t batt_current_x10 = CurrentData.q31_battery_current_mA / 100;
+        //q31_t phase_current_x10 = ((4 * batt_current_x10) << 11) / (3 * MS.u_q);
+        //sprintf_(buffer, "%d | %d %d\n", MS.u_q, batt_current_x10, phase_current_x10);
+
 
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
 
-        //if(ui8_UART_TxCplt_flag && DD.log)
-        //{
-		//    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
-        //    ui8_UART_TxCplt_flag = 0;
-        //}
+        if(ui8_UART_TxCplt_flag && DD.log)
+        {
+		    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
+            ui8_UART_TxCplt_flag = 0;
+        }
          
 #endif
 
@@ -956,6 +986,7 @@ int main(void)
 
 #endif
 		  ui32_tim3_counter=0;
+          if(ui8_slowloop_counter > 0) --ui8_slowloop_counter;
 	  }// end of slow loop
 
   /* USER CODE END WHILE */
@@ -2299,17 +2330,31 @@ static q31_t get_battery_power()
 {
     // returns battery_power in [W] x 10
 
-    // battery current
-    q31_battery_current_cumulated -= q31_battery_current_cumulated >> 3;
-    q31_t battery_current = (MS.i_q * MS.u_q * 38) >> 11;
-    battery_current = (battery_current * 3) >> 6; // >> 5 because of sampling (32), >> 1 factor 3/2
-    q31_battery_current_cumulated += battery_current;
-    battery_current = q31_battery_current_cumulated >> 3;  // battery current in mA
-    
-    q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;   // battery voltage in mV
+    // battery to phase current conversion
+    // I_B : battery current
+    // i_ph : phase current
+    // s : pwm duty cycle (= u_q / _T)
+    // theory: I_B = (3/4) * s * i_ph
 
-    q31_t battery_power_x10 = (battery_current >> 5) * (battery_voltage >> 5);    // battery power in mW, left shift from sampling
-    battery_power_x10 = battery_power_x10 / 100;      // battery power in W x 10
+    // MS.i_q = direct adc value (x32 -> ui8_foc_counter!!)
+    // (MS.u_q >> 11) -> pwm duty cycle 's'
+
+    // MS.i_q * CAL_I = phase current in mA x32 (ui8_foc_counter!!)
+    //
+
+    // battery current
+    q31_t battery_current_mA = CAL_I * ((MS.i_q * MS.u_q) >> 11);           // battery current in mA x 32 (foc_counter)
+    battery_current_mA = (battery_current_mA * 3) >> (5 + 2);               // battery current in mA   /   >> 5 because of sampling (32), >> 2 factor 3/4
+    //
+    CurrentData.q31_battery_current_mA_cumulated -= CurrentData.q31_battery_current_mA_cumulated >> CurrentData.ui8_battery_current_shift;
+    CurrentData.q31_battery_current_mA_cumulated += battery_current_mA;
+    battery_current_mA = CurrentData.q31_battery_current_mA_cumulated >> CurrentData.ui8_battery_current_shift;  // battery current in mA   // filtered
+    CurrentData.q31_battery_current_mA = battery_current_mA;
+    
+    //q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;   // battery voltage in mV
+
+    // battery power in W x 10
+    q31_t battery_power_x10 = (battery_current_mA * BatteryVoltageData.q31_battery_voltage_V_x10) / 1000;
 
     return battery_power_x10;
 }
@@ -2353,8 +2398,11 @@ static q31_t get_target_power()
         
         //uint32_t pas_rpm = 21818 / uint32_PAS;
         //
+#if (DISPLAY_TYPE == DISPLAY_TYPE_AUREUS)
         uint32_t pas_omega_x10 = (2285 * (DA.Rx.AssistLevel >> 3)) / uint32_PAS;                // including the assistfactor x10
-        //uint32_t pas_omega_x10 = (2285 * (10)) / uint32_PAS;                // including the assistfactor x10
+#else
+        uint32_t pas_omega_x10 = (2285 * (10)) / uint32_PAS;                // including the assistfactor x10
+#endif
         //uint32_t pas_omega_x10 = (2285 * (1.0)) / PAS_mod;                // including the assistfactor x10
     	//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
     	uint16_t torque_nm = (uint32_torque_cumulated >> 4) >> 4;
@@ -2372,9 +2420,9 @@ static void limit_target_power(q31_t* target_power)
 {
     // ---------------------------------------
     // limit power
-    if(*target_power > 8000)
+    if(*target_power > 10000)
     {
-        *target_power = 8000;
+        *target_power = 10000;
     }
 
     if(*target_power < 0)
@@ -2383,7 +2431,35 @@ static void limit_target_power(q31_t* target_power)
     }
 
     // ---------------------------------------
-    // todo: limit current
+    // limit battery current
+    // q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;  // battery voltage in mv
+    q31_t limit_x10 = BatteryVoltageData.q31_battery_voltage_V_x10 * BATTERYCURRENT_MAX / 10;
+    if(*target_power > limit_x10)
+    {
+        *target_power = limit_x10;
+    }
+    
+    // ---------------------------------------
+    // limit phase current
+    // I_B : battery current, s : duty cycle (u_q / _T), i_ph = phase current
+    // assuming cos(phi) = 1 -> I_B = (3 / 4) * s * i_ph
+    //
+    // I_B_max = (3/4) * s * i_ph_max
+        
+    q31_t bat_max_current_x10 = (3 * PH_CURRENT_MAX * MS.u_q) >> (11 + 2);
+    limit_x10 = BatteryVoltageData.q31_battery_voltage_V_x10 * bat_max_current_x10 / 10;
+    if(MS.u_q > 300)
+    {
+        // if u_q = 0 -> the limit is zero!
+        if(*target_power > limit_x10)
+        {
+            *target_power = limit_x10;
+        }
+    }
+    else
+    {
+        // lets hope nothing happens below u_q = 300
+    }
 
 
     // ---------------------------------------
@@ -2403,11 +2479,6 @@ static void limit_target_power(q31_t* target_power)
         //*target_power = *target_power * (V2 - speed_x10) / 32;
         *target_power = *target_power * (V2 - speed_x10) / 16;
     }
-
-    //if( (uint32_tics_filtered>>3) < ui32_wheel_speed_tics_higher_limit)
-    //{
-    //    *target_power = 0;
-    //}
 
     // ---------------------------------------
     // todo: limit temperature
@@ -2438,7 +2509,8 @@ static void i_q_control()
         u_q_temp = 0;
 
         PI_iq.integral_part = 0;
-        q31_battery_current_cumulated = 0;
+        CurrentData.q31_battery_current_mA_cumulated = 0;
+        CurrentData.q31_battery_current_mA = 0;
         MS.i_q = 0;
         MS.i_d = 0;
 
@@ -2529,8 +2601,7 @@ static void i_d_control()
 
 
 
-    q31_t i_d = (MS.i_d >> 5) * 38; // i_d in mA
-    //q31_t i_q = (MS.i_q >> 5) * 38;
+    q31_t i_d = (MS.i_d >> 5) * CAL_I; // i_d in mA
     
     q31_i_d_cumulated -= q31_i_d_cumulated >> 3;
     q31_i_d_cumulated += i_d;
@@ -2550,6 +2621,7 @@ static void i_d_control()
         MS.foc_alpha = 0;
         alpha_temp = 0;
 
+        // todo: if targetpower > 100W ... and HALL_STATE != SIXSTEP..
         if( (enum_hall_angle_state == HALL_STATE_PLL) && ui8_pwm_enabled_flag)
         {
             if(!enum_motor_error_state)
@@ -2561,6 +2633,7 @@ static void i_d_control()
 
     if(i_d_control_state == 1)
     {
+        // if targetpower < 50 W ..
         if( (enum_hall_angle_state == HALL_STATE_SIXSTEP) || !ui8_pwm_enabled_flag)
         {
             i_d_control_state = 0;

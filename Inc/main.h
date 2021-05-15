@@ -113,8 +113,31 @@ extern volatile uint8_t ui8_UART_TxCplt_flag;
 
 typedef struct
 {
+    q31_t           q31_battery_voltage_adc_cumulated;
+    uint8_t         ui8_shift;
+    q31_t           q31_battery_voltage_V_x10;
+} BatteryVoltageData_t;
 
-	q31_t       	Voltage;
+typedef struct
+{
+    q31_t           q31_temperature_adc_cumulated;
+    uint8_t         ui8_shift;
+    q31_t           q31_temperature_degrees;
+} TemperatureData_t;
+
+typedef struct
+{
+    q31_t           q31_battery_current_mA_cumulated;
+    q31_t           q31_battery_current_mA;
+    q31_t           ui8_battery_current_shift;
+} CurrentData_t;
+
+
+
+typedef struct
+{
+
+	//q31_t       	Voltage;   -> use BatteryVoltageData..
 	uint32_t       	Speed;
 	q31_t          	i_d;
 	q31_t          	i_q;
@@ -122,12 +145,12 @@ typedef struct
 	q31_t          	u_q;
     q31_t           foc_alpha;
 	q31_t          	u_abs;
-	q31_t          	Battery_Current;
+	//q31_t          	Battery_Current; -> use CurrentData
 	uint8_t 		hall_angle_detect_flag;
 	uint8_t 		char_dyn_adc_state;
 	uint8_t 		assist_level;
 	uint8_t 		regen_level;
-	uint32_t        Temperature;
+	//uint32_t        Temperature;  -> use TemperatureData..
 	int8_t         	system_state;
 	int8_t         	gear_state;
 	int8_t         	error_state;
