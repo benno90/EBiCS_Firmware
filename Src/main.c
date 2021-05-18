@@ -502,7 +502,7 @@ int main(void)
 #if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
 			DisplayDebug_Init(&DD);
     DD.go = 0;
-    DD.log = 1;
+    DD.log = 0;
     DD.light = 0;
     DD.ui16_value = 0;
     DD.ui16_value2 = 0;
@@ -933,7 +933,8 @@ int main(void)
 		//uint32_t pas_omega = 2285 / uint32_PAS;
 		//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
 		//uint16_t pedal_power = pas_omega * torque_nm;
-        sprintf_(buffer, "%d %d\n", BatteryVoltageData.q31_battery_voltage_V_x10, TemperatureData.q31_temperature_degrees);
+        //sprintf_(buffer, "%d %d\n", BatteryVoltageData.q31_battery_voltage_V_x10, TemperatureData.q31_temperature_degrees);
+        sprintf_(buffer, "%d\n", TemperatureData.q31_temperature_degrees);
 
         //q31_t batt_current_x10 = CurrentData.q31_battery_current_mA / 100;
         //q31_t phase_current_x10 = ((4 * batt_current_x10) << 11) / (3 * MS.u_q);
@@ -1624,7 +1625,8 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 	//extrapolate recent rotor position
 	ui16_tim2_recent = __HAL_TIM_GET_COUNTER(&htim2); // read in timertics since last event
                 
-    if(ui16_tim2_recent > ui16_timertics + (ui16_timertics >> 2))
+    //if(ui16_tim2_recent > ui16_timertics + (ui16_timertics >> 2))  // ui16_timertics * 5/4 was too sensitive
+    if(ui16_tim2_recent > (ui16_timertics * 2) )       
     {
         disable_pwm();
         enum_motor_error_state = MOTOR_STATE_BLOCKED;
