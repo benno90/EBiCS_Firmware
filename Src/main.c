@@ -189,15 +189,6 @@ uint16_t switchtime[3];
 volatile uint16_t adcData[8]; //Buffer for ADC1 Input
 q31_t tic_array[6];
 
-//Rotor angle scaled from degree to q31 for arm_math. -180°-->-2^31, 0°-->0, +180°-->+2^31
-const q31_t DEG_0 = 0;
-const q31_t DEG_plus60 = 715827883; //744755980
-const q31_t DEG_plus120= 1431655765; //1442085801
-const q31_t DEG_plus180= 2147483647; //2143375202
-const q31_t DEG_minus60= -715827883; //-704844603
-const q31_t DEG_minus120= -1431655765; //-1400256473
-    
-const q31_t Q31_DEGREE = 11930464;
 
 const uint32_t ui32_wheel_speed_tics_lower_limit  = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * SPEEDLIMIT * 10); //tics=wheelcirc*timerfrequency/(no. of hallevents per rev*gear-ratio*speedlimit)*3600/1000000
 const uint32_t ui32_wheel_speed_tics_higher_limit = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * (SPEEDLIMIT + 3) * 10);
@@ -265,7 +256,7 @@ static uint8_t ui8_motor_error_state_hall_count = 0;
 static uint16_t ui16_motor_init_state_timeout = 0;
 
 static q31_t q31_speed_pll_i = 0;
-static q31_t q31_pll_abs_delta = Q31_DEGREE * 60;
+static q31_t q31_pll_abs_delta = 715827882; // +60 degree
 
 
 
@@ -934,11 +925,12 @@ int main(void)
 		//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
 		//uint16_t pedal_power = pas_omega * torque_nm;
         //sprintf_(buffer, "%d %d\n", BatteryVoltageData.q31_battery_voltage_V_x10, TemperatureData.q31_temperature_degrees);
-        sprintf_(buffer, "%d\n", TemperatureData.q31_temperature_degrees);
+        //sprintf_(buffer, "%d\n", TemperatureData.q31_temperature_degrees);
 
         //q31_t batt_current_x10 = CurrentData.q31_battery_current_mA / 100;
         //q31_t phase_current_x10 = ((4 * batt_current_x10) << 11) / (3 * MS.u_q);
         //sprintf_(buffer, "%d | %d %d\n", MS.u_q, batt_current_x10, phase_current_x10);
+        sprintf_(buffer, "%d\n", MS.u_q);
 
 
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
@@ -2683,12 +2675,11 @@ static void i_d_control()
 void runPIcontrol()
 {
     
-    i_q_control();
-    i_d_control();
+    //i_q_control();
+    //i_d_control();
     PI_flag = 0;
     
     // testing - directly setting duty cycle
-    /*
     if(DD.go)
     {
         MS.u_q = DD.ui16_value;
@@ -2710,7 +2701,6 @@ void runPIcontrol()
             disable_pwm();
         }
     }
-    */
 
 }
 

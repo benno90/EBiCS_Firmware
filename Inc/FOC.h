@@ -43,6 +43,14 @@ extern q31_t temp5;
 extern q31_t temp6;
 extern char PI_flag;
 
+extern const q31_t DEG_0;
+extern const q31_t DEG_plus60;
+extern const q31_t DEG_plus120;
+extern const q31_t DEG_plus180;
+extern const q31_t DEG_minus60;
+extern const q31_t DEG_minus120;
+extern const q31_t Q31_DEGREE;
+
 
 
 extern q31_t e_log[300][6];

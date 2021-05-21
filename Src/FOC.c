@@ -10,6 +10,23 @@
 #include "stm32f1xx_hal.h"
 #include <arm_math.h>
 
+
+const q31_t DEG_0 = 0;
+const q31_t DEG_plus60   =  715827882;
+const q31_t DEG_plus120  =  1431655765;
+const q31_t DEG_plus180  =  2147483647;
+const q31_t DEG_minus60  = -715827882;
+const q31_t DEG_minus120 = -1431655765;
+const q31_t Q31_DEGREE   =  11930464;
+
+// svpwm2 defines
+// _T = 1 << 11
+#define SQRT_SHIFT 6
+#define SHIFT 17                // (SQRT_SHIFT + 11)
+#define TWO_SHIFTED 536870912   // 2 << (SQRT_SHIFT + 22)
+#define ONE_SHIFTED 268435456   // 1 << (SQRT_SHIFT + 22)
+#define SQRT3_SHIFTED 111       // sqrt(3) << SQRT_SHIFT
+
 //q31_t	T_halfsample = 0.00003125;
 //q31_t	counterfrequency = 64000000;
 //q31_t	U_max = (1/_SQRT3)*_U_DC;
@@ -44,6 +61,7 @@ TIM_HandleTypeDef htim1;
 
 void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int16_t int16_i_q_target, MotorState_t* MS_FOC);
 void svpwm(q31_t q31_u_alpha, q31_t q31_u_beta);
+//void svpwm2(q31_t q31_u_alpha, q31_t q31_u_beta, q31_t q31_angle);
 
 void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int16_t int16_i_q_target, MotorState_t* MS_FOC)
 {
@@ -117,10 +135,12 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
     //}
 	
     q31_t q31_theta2 = q31_teta + MS_FOC->foc_alpha;
+    //q31_theta2 = -q31_theta2;
     arm_sin_cos_q31(q31_theta2, &sinevalue, &cosinevalue);
 
 	//inverse Park transformation
 	arm_inv_park_q31(MS_FOC->u_d, MS_FOC->u_q, &q31_u_alpha, &q31_u_beta, -sinevalue, cosinevalue);
+	//arm_inv_park_q31(MS_FOC->u_d, MS_FOC->u_q, &q31_u_alpha, &q31_u_beta, sinevalue, cosinevalue);
 
 
 
@@ -153,6 +173,11 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
 
 	//call SVPWM calculation
 	svpwm(q31_u_alpha, q31_u_beta);
+    
+    // benno 10.05.21 - svpwm2 only works with negative theta & negative u_beta -> todo: check why this is the case
+    // svpwm2(q31_u_alpha, -q31_u_beta, q31_theta2);
+    // svpwm2(q31_u_alpha, q31_u_beta, q31_theta2);
+    
 	//temp6=__HAL_TIM_GET_COUNTER(&htim1);
 
     ++ui8_foc_counter;
@@ -262,3 +287,48 @@ void svpwm(q31_t q31_u_alpha, q31_t q31_u_beta)	{
 }
 
 
+
+/*void svpwm2(q31_t q31_u_alpha, q31_t q31_u_beta, q31_t q31_angle)
+{
+    uint8_t sector;
+    q31_t Ualpha = q31_u_alpha * _T * SQRT3_SHIFTED;
+    q31_t Ubeta = (q31_u_beta * _T) << SQRT_SHIFT;  
+
+    if(q31_angle > 0)
+    {
+        if(q31_angle < DEG_plus60)
+            sector = 1;
+        else if(q31_angle < DEG_plus120)
+            sector = 2;
+        else
+            sector = 3;
+    }
+    else
+    {
+        if(q31_angle < DEG_minus120)
+            sector = 4;
+        else if(q31_angle < DEG_minus60)
+            sector = 5;
+        else
+            sector = 6;
+    }
+
+    if( sector == 1 || sector == 4 )
+    {
+        switchtime[0] = (Ualpha + Ubeta + TWO_SHIFTED)  >> (SHIFT + 2);
+        switchtime[1] = (-Ualpha + 3 * Ubeta + TWO_SHIFTED) >> (SHIFT + 2);
+        switchtime[2] = (-Ualpha - Ubeta + TWO_SHIFTED) >> (SHIFT + 2);
+    }
+    else if( sector == 2 || sector == 5 )
+    {
+        switchtime[0] = (Ualpha + ONE_SHIFTED) >> (SHIFT + 1);
+        switchtime[1] = (Ubeta + ONE_SHIFTED) >> (SHIFT + 1);
+        switchtime[2] = (ONE_SHIFTED - Ubeta) >> (SHIFT + 1);
+    }
+    else //if( sector == 3 || sector == 6 )
+    {
+        switchtime[0] = (Ualpha - Ubeta + TWO_SHIFTED) >> (SHIFT + 2);
+        switchtime[1] = (-Ualpha + Ubeta + TWO_SHIFTED) >> (SHIFT + 2);
+        switchtime[2] = (-Ualpha - 3 * Ubeta + TWO_SHIFTED) >> (SHIFT + 2);
+    }
+}*/
