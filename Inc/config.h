@@ -17,9 +17,11 @@
 #define DISPLAY_TYPE_KUNTENG (1<<1)							// For ASCII-Output in Debug mode
 #define DISPLAY_TYPE_DEBUG (1<<0)							// For ASCII-Output in Debug mode);
 
-#define TRIGGER_OFFSET_ADC 50
-#define TRIGGER_DEFAULT 2020
+#define TRIGGER_OFFSET_ADC 100 // 50
 #define _T 2048     // 2028
+#define TRIGGER_DEFAULT 2047
+#define PWM_DEAD_TIME 32
+
 #define CAL_BAT_V 25   
 #define CAL_V 25     // adcData[0] * CAL_V = voltage in mV
 #define CAL_I 55      //38       
@@ -56,13 +58,14 @@
 #define TS_MODE
 #define TQ_ADC_INDEX 6  // AD1: 6, SP: 1
 #define TEMP_ADC_INDEX 5 // ADC_CHANNEL_TEMPSENSOR
-#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
-//#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
+//#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
+#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
 #define REVERSE 1
 #define PUSHASSIST_CURRENT 30
 #define VOLTAGE_MIN 300
 #define REGEN_CURRENT 0
 //#define FAST_LOOP_LOG
+#define FAST_LOOP_LOG_SIZE 256
 //#define DISABLE_DYNAMIC_ADC
 //#define INDIVIDUAL_MODES
 //#define SPEEDTHROTTLE

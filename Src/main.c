@@ -559,6 +559,13 @@ int main(void)
         (TemperatureData.q31_temperature_adc_cumulated >> 5) << TemperatureData.ui8_shift;
     TemperatureData.q31_temperature_degrees = 0; // setting it in the slow loop
 
+// comment hochsitzcola 20.05.21
+#ifdef DISABLE_DYNAMIC_ADC // set  injected channel with offsets
+	ADC1->JSQR=0b00100000000000000000; //ADC1 injected reads phase A JL = 0b00, JSQ4 = 0b00100 (decimal 4 = channel 4)
+    ADC1->JOFR1 = ui16_ph1_offset;
+	ADC2->JSQR=0b00101000000000000000; //ADC2 injected reads phase B, JSQ4 = 0b00101, decimal 5
+	ADC2->JOFR1 = ui16_ph2_offset;
+#endif
 
    	ui8_adc_offset_done_flag = 1;
 
@@ -656,6 +663,11 @@ int main(void)
 
 #if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
 		DisplayDebug_Service(&DD);
+        if(DD.ui16_value2 > 0)
+        {
+            ui8_fast_loop_log_state = 1;
+            DD.ui16_value2 = 0;
+        }
 		if(DD.light)
 		{
    		    HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_SET);
@@ -785,18 +797,25 @@ int main(void)
 //------------------------------------------------------------------------------------------------------------
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && defined(FAST_LOOP_LOG))
-		if(ui8_debug_state==3 && ui8_UART_TxCplt_flag){
-	        sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n", e_log[k][0], e_log[k][1], e_log[k][2],e_log[k][3],e_log[k][4],e_log[k][5]); //>>24
-			i=0;
-			while (buffer[i] != '\0')
-			{i++;}
-			ui8_UART_TxCplt_flag=0;
-			HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, i);
-			k++;
-			if (k>299){
-				k=0;
-				ui8_debug_state=0;
-				//Obs_flag=0;
+		if(ui8_fast_loop_log_state == 2 && ui8_UART_TxCplt_flag)
+        {
+            if(k < FAST_LOOP_LOG_SIZE)
+            {
+	            sprintf_(buffer, "%d, %d\n", e_log[k][0], e_log[k][1]);
+			    i = 0;
+			    while (buffer[i] != '\0')
+                {
+			        i++;
+                }
+			    ui8_UART_TxCplt_flag=0;
+			    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, i);
+			    k++;
+            }
+            //
+			if (k >= FAST_LOOP_LOG_SIZE)
+            {
+			    k=0;
+                ui8_fast_loop_log_state = 0;
 			}
 		}
 #endif
@@ -917,7 +936,9 @@ int main(void)
 
 		  //}
 
-#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && !defined(FAST_LOOP_LOG))
+//#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && !defined(FAST_LOOP_LOG))
+#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
+    
 		  //print values for debugging
 
 
@@ -930,19 +951,21 @@ int main(void)
         //q31_t batt_current_x10 = CurrentData.q31_battery_current_mA / 100;
         //q31_t phase_current_x10 = ((4 * batt_current_x10) << 11) / (3 * MS.u_q);
         //sprintf_(buffer, "%d | %d %d\n", MS.u_q, batt_current_x10, phase_current_x10);
-        sprintf_(buffer, "%d\n", MS.u_q);
 
 
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
-
+    if(ui8_fast_loop_log_state == 0)
+    {
+        sprintf_(buffer, "%d\n", MS.u_q);
         if(ui8_UART_TxCplt_flag && DD.log)
         {
 		    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
             ui8_UART_TxCplt_flag = 0;
         }
+    }
          
 #endif
 
@@ -1283,7 +1306,7 @@ static void MX_TIM1_Init(void)
   sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
   sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
   sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
-  sBreakDeadTimeConfig.DeadTime = 32;
+  sBreakDeadTimeConfig.DeadTime = PWM_DEAD_TIME;
   sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
   sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
   sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
@@ -2095,7 +2118,7 @@ int32_t map (int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t
 }
 
 //assuming, a proper AD conversion takes 350 timer tics, to be confirmed. DT+TR+TS deadtime + noise subsiding + sample time
-void dyn_adc_state(q31_t angle){
+/*void dyn_adc_state(q31_t angle){
 	if (switchtime[2]>switchtime[0] && switchtime[2]>switchtime[1]){
 		MS.char_dyn_adc_state = 1; // -90° .. +30°: Phase C at high dutycycles
 		if(switchtime[2]>1500)TIM1->CCR4 =  switchtime[2]-TRIGGER_OFFSET_ADC;
@@ -2112,6 +2135,65 @@ void dyn_adc_state(q31_t angle){
 		MS.char_dyn_adc_state = 3; // +150 .. -90° Phase B at high dutycycles
 		if(switchtime[1]>1500)TIM1->CCR4 =  switchtime[1]-TRIGGER_OFFSET_ADC;
 		else TIM1->CCR4 = TRIGGER_DEFAULT;
+	}
+}*/
+
+
+
+void dyn_adc_state(q31_t angle)
+{
+    uint16_t tph1N = _T - switchtime[0];
+    uint16_t tph2N = _T - switchtime[1];
+    uint16_t tph3N = _T - switchtime[2];
+
+
+	if (switchtime[2] > switchtime[0] && switchtime[2] > switchtime[1])
+    {
+		MS.char_dyn_adc_state = 1; // 180 - 300 degrees -> phase 3 at high duty cycles
+        // measure phase 1 & 2
+		if(switchtime[2] > 1500)
+        {
+            if( (tph1N > (2 * (tph3N + PWM_DEAD_TIME))) && (tph2N > (2 * (tph3N + PWM_DEAD_TIME))) )
+                TIM1->CCR4 =  switchtime[2] - TRIGGER_OFFSET_ADC;
+            else
+		        TIM1->CCR4 = TRIGGER_DEFAULT;
+        }
+		else
+        {
+            TIM1->CCR4 = TRIGGER_DEFAULT;
+        }
+	}
+	else if (switchtime[0] > switchtime[1] && switchtime[0] > switchtime[2]) 
+    {
+		MS.char_dyn_adc_state = 2; // -60 - +60 degrees -> phase 1 at high duty cycles
+        // measure phase 2 & 3
+		if(switchtime[0] > 1500)
+        {
+            if( (tph2N > (2 * (tph1N + PWM_DEAD_TIME))) &&  (tph3N > (2 * (tph1N + PWM_DEAD_TIME))) )
+                TIM1->CCR4 =  switchtime[0] - TRIGGER_OFFSET_ADC;
+            else
+                TIM1->CCR4 = TRIGGER_DEFAULT;
+        }
+		else
+        {
+            TIM1->CCR4 = TRIGGER_DEFAULT;
+        }
+	}
+    else //if (switchtime[1]>switchtime[0] && switchtime[1]>switchtime[2])
+    {
+		MS.char_dyn_adc_state = 3; // 60 - 180 degrees -> phase 2 at high duty cycles
+        // measure phase 3 & 1
+		if(switchtime[1] > 1500)
+        {
+            if( (tph1N > (2 * (tph2N + PWM_DEAD_TIME))) && (tph3N > (2 * (tph2N + PWM_DEAD_TIME))) )
+                TIM1->CCR4 =  switchtime[1] - TRIGGER_OFFSET_ADC;
+            else
+                TIM1->CCR4 = TRIGGER_DEFAULT;
+        }
+		else
+        {
+            TIM1->CCR4 = TRIGGER_DEFAULT;
+        }
 	}
 }
 
@@ -2675,12 +2757,12 @@ static void i_d_control()
 void runPIcontrol()
 {
     
-    //i_q_control();
-    //i_d_control();
+    i_q_control();
+    i_d_control();
     PI_flag = 0;
     
     // testing - directly setting duty cycle
-    if(DD.go)
+    /*if(DD.go)
     {
         MS.u_q = DD.ui16_value;
         MS.u_d = 0;
@@ -2700,7 +2782,7 @@ void runPIcontrol()
         {
             disable_pwm();
         }
-    }
+    }*/
 
 }
 

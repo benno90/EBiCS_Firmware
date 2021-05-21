@@ -53,9 +53,8 @@ extern const q31_t Q31_DEGREE;
 
 
 
-extern q31_t e_log[300][6];
-extern char Obs_flag;
-extern uint8_t ui8_debug_state;
+extern q31_t e_log[FAST_LOOP_LOG_SIZE][2];
+extern uint8_t ui8_fast_loop_log_state;
 
 
 

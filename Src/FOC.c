@@ -45,12 +45,11 @@ q31_t x2;
 q31_t teta_obs;
 
 #ifdef FAST_LOOP_LOG
-q31_t e_log[300][6];
+q31_t e_log[FAST_LOOP_LOG_SIZE][2];
+uint16_t z=0;
+uint8_t ui8_fast_loop_log_state=0;
 #endif
 
-q31_t z;
-char Obs_flag=1;
-uint8_t ui8_debug_state=0;
 
 char PI_flag=0;
 
@@ -152,22 +151,26 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
 	temp5=MS_FOC->u_d;
 	temp6=MS_FOC->u_q;
 
-	if(uint32_PAS_counter < PAS_TIMEOUT&&ui8_debug_state==0)
-			{
-		e_log[z][0]=temp1;//fl_e_alpha_obs;
-		e_log[z][1]=temp2;//fl_e_beta_obs;
-		e_log[z][2]=temp3;//(q31_t)q31_teta_obs>>24;
-		e_log[z][3]=temp4;
-		e_log[z][4]=temp5;
-		e_log[z][5]=temp6;
-		z++;
-		if(z>150) Obs_flag=1;
-		if (z>299)
-		{z=0;
+	if(ui8_fast_loop_log_state == 1)
+    {
+        if(z < FAST_LOOP_LOG_SIZE)
+        {
+		    e_log[z][0]=temp1;//fl_e_alpha_obs;
+		    e_log[z][1]=temp2;//fl_e_beta_obs;
+		    //e_log[z][2]=temp3;//(q31_t)q31_teta_obs>>24;
+		    //e_log[z][3]=temp4;
+		    //e_log[z][4]=temp5;
+		    //e_log[z][5]=temp6;
+            ++z;
+        }
+        //
+        if(z == FAST_LOOP_LOG_SIZE)
+        {
+            z = 0;
+            ui8_fast_loop_log_state = 2;
+        }
+    }
 
-		ui8_debug_state=2;}
-			}
-	else {if(ui8_debug_state==2)ui8_debug_state=3;;}
 
 #endif
 
