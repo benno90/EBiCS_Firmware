@@ -633,6 +633,9 @@ int main(void)
 		{
 			DA.Tx.Wheeltime_ms = 0x0DAC;
 		}
+
+        DA.Tx.Current_A_x3 = (uint16_t) CurrentData.q31_battery_current_mA / 333;
+
 		DisplayAureus_Service(&DA);
 		if(DA.Rx.Headlight)
 		{
@@ -1743,7 +1746,7 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
                     }
                     else
                     {
-                        ui8_extrapolation_hall_count = 10;
+                        ui8_extrapolation_hall_count = 30;
                     }
                 }
 
@@ -2531,9 +2534,9 @@ static q31_t get_target_power()
         //return DA.Rx.AssistLevel * 10;
 
         uint32_t PAS_mod = uint32_PAS;
-        if(PAS_mod < PAS_TIMEOUT && PAS_mod > 660)
+        if(PAS_mod < PAS_TIMEOUT && PAS_mod > 500)     // 660
         {
-            PAS_mod = 660;  // 30 rpm from the beginning!
+            PAS_mod = 500;  // 43 rpm from the beginning!
         }
 
 
@@ -2968,7 +2971,7 @@ q31_t speed_PLL (q31_t ist, q31_t soll)
 
             // PLL seems to be in trouble
             // fallback to extraploation
-            ui8_extrapolation_hall_count = 20;
+            ui8_extrapolation_hall_count = 30;
             enum_hall_angle_state = HALL_STATE_EXTRAPOLATION;
         }
     }

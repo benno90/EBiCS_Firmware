@@ -58,8 +58,8 @@
 #define TS_MODE
 #define TQ_ADC_INDEX 6  // AD1: 6, SP: 1
 #define TEMP_ADC_INDEX 5 // ADC_CHANNEL_TEMPSENSOR
-#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
-//#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
+//#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
+#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
 #define REVERSE 1
 #define PUSHASSIST_CURRENT 30
 #define VOLTAGE_MIN 300
@@ -72,8 +72,8 @@
 //#define THROTTLE_OVERRIDE
 #define REGEN_CURRENT_MAX 0
 #define SPEED_PLL
-#define P_FACTOR_PLL  8 // 8 //  11  //6
-#define I_FACTOR_PLL  9 //9 // 10  //11
+#define P_FACTOR_PLL  9  // 8 // 8 //  11  //6
+#define I_FACTOR_PLL  7 //9 //9 // 10  //11
 #define AUTODETECT 0
 
 #define EXTERNAL 1

@@ -27,7 +27,7 @@ typedef struct
   uint8_t  Battery;                   // KM_BATTERY_NORMAL / KM_BATTERY_LOW
   uint16_t Wheeltime_ms;              // Unit:1ms
   uint8_t  Error;                     // KM_ERROR_NONE, ..
-  uint16_t Current_x10;               // Unit: 0.1A
+  uint16_t Current_A_x3;               // Unit: Ampere x3
 } TX_PARAM_t;
 
 

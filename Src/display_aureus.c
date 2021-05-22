@@ -148,8 +148,8 @@ void DisplayAureus_Service(DISPLAY_AUREUS_t* DA_ctx)
     TxBuff[1] = 0x1A;
     TxBuff[2] = 0x52;
     TxBuff[3] = 0x05;
-    TxBuff[4] = 0x0;           // low voltage
-    TxBuff[5] = 0x0;          // battery current
+    TxBuff[4] = 0x0;                            // low voltage
+    TxBuff[5] = DA_ctx->Tx.Current_A_x3;          // battery current
     //TxBuff[6] = 0x0D;         // wheel cycle time high byte (0D)
     //TxBuff[7] = 0xC1;         // wheel cycle time low byte (AC)
     TxBuff[6] = (DA_ctx->Tx.Wheeltime_ms & 0xFF00) >> 8;
