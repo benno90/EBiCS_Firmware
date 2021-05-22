@@ -47,8 +47,8 @@ q31_t teta_obs;
 #ifdef FAST_LOOP_LOG
 q31_t e_log[FAST_LOOP_LOG_SIZE][2];
 uint16_t z=0;
-uint8_t ui8_fast_loop_log_state=0;
 #endif
+uint8_t ui8_fast_loop_log_state=0;
 
 
 char PI_flag=0;

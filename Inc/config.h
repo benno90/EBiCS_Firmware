@@ -74,7 +74,7 @@
 #define SPEED_PLL
 #define P_FACTOR_PLL  8 // 8 //  11  //6
 #define I_FACTOR_PLL  9 //9 // 10  //11
-#define AUTODETECT 1
+#define AUTODETECT 0
 
 #define EXTERNAL 1
 #define INTERNAL 0

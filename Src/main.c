@@ -105,6 +105,7 @@ DMA_HandleTypeDef hdma_usart1_rx;
 uint32_t ui32_tim1_counter=0;
 uint32_t ui32_tim3_counter=0;
 static uint8_t slow_loop_counter = 0;
+static uint8_t slow_loop_print_counter = 0;
 
 uint8_t ui8_hall_state=0;
 uint8_t ui8_hall_state_old=0;
@@ -664,11 +665,15 @@ int main(void)
 
 #if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
 		DisplayDebug_Service(&DD);
+        
+#ifdef FAST_LOOP_LOG
         if(DD.ui16_value2 > 0)
         {
             ui8_fast_loop_log_state = 1;
             DD.ui16_value2 = 0;
         }
+#endif
+
 		if(DD.light)
 		{
    		    HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_SET);
@@ -953,18 +958,61 @@ int main(void)
         //q31_t phase_current_x10 = ((4 * batt_current_x10) << 11) / (3 * MS.u_q);
         //sprintf_(buffer, "%d | %d %d\n", MS.u_q, batt_current_x10, phase_current_x10);
 
-
 		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
+
+        switch (DD.ui16_value2)
+        {
+        case 1:
+        {
+            uint16_t velocity_kmh = 2234 * 50 * 36 / (6 * GEAR_RATIO * (uint32_tics_filtered>>3));
+            sprintf_(buffer,"%u\n", velocity_kmh);
+            break;
+        }
+        case 2:
+            sprintf_(buffer,"%u\n", (uint16_t) TemperatureData.q31_temperature_degrees);
+            break;
+        case 3:
+            sprintf_(buffer,"%u\n", (uint16_t) BatteryVoltageData.q31_battery_voltage_V_x10);
+            break;
+        case 4:
+            sprintf_(buffer,"%u\n", (uint16_t) MS.u_q);
+            break;
+        case 5:
+            sprintf_(buffer,"%u\n", (uint16_t) q31_degree_to_degree(MS.foc_alpha));
+            break;
+        case 6:
+            sprintf_(buffer,"%u\n", (uint16_t) CurrentData.q31_battery_current_mA / 100);
+            break;
+        case 7:
+        {
+            uint32_t phase_current = CurrentData.q31_battery_current_mA / 100;
+            phase_current = phase_current * 4 * _T / (3 * MS.u_q);
+            sprintf_(buffer,"%u\n", (uint16_t) phase_current);        
+            break;
+        }
+        default:
+            break;
+        }
+
+
     if(ui8_fast_loop_log_state == 0)
     {
-        sprintf_(buffer, "%d\n", MS.u_q);
-        if(ui8_UART_TxCplt_flag && DD.log)
+        if(slow_loop_print_counter == 0)
         {
-		    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
-            ui8_UART_TxCplt_flag = 0;
+            //sprintf_(buffer, "%d\n", MS.u_q);
+            if(ui8_UART_TxCplt_flag && DD.log)
+            {
+		        HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
+                ui8_UART_TxCplt_flag = 0;
+            }
+            slow_loop_print_counter = 8;
+        }
+        else
+        {
+            --slow_loop_print_counter;
         }
     }
          
@@ -2495,7 +2543,8 @@ static q31_t get_target_power()
 #if (DISPLAY_TYPE == DISPLAY_TYPE_AUREUS)
         uint32_t pas_omega_x10 = (2285 * (DA.Rx.AssistLevel >> 3)) / uint32_PAS;                // including the assistfactor x10
 #else
-        uint32_t pas_omega_x10 = (2285 * (10)) / uint32_PAS;                // including the assistfactor x10
+        //uint32_t pas_omega_x10 = (2285 * (10)) / uint32_PAS;                // including the assistfactor x10
+        uint32_t pas_omega_x10 = (2285 * (DD.ui16_value)) / uint32_PAS;                // including the assistfactor x10
 #endif
         //uint32_t pas_omega_x10 = (2285 * (1.0)) / PAS_mod;                // including the assistfactor x10
     	//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again

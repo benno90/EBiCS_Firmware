@@ -118,9 +118,9 @@ void DisplayDebug_Service(DISPLAY_DEBUG_t *DD_ctx)
     {
         // parse value
         DD_ctx->ui16_value = atoi(&Buff[2]);
-        if(DD_ctx->ui16_value > 800)
+        if(DD_ctx->ui16_value > 40)
         {
-            DD_ctx->ui16_value = 800;
+            DD_ctx->ui16_value = 40;
         }
         sprintf_(TxBuff, "ui16_value = %u\n", DD_ctx->ui16_value);
         debug_print2(TxBuff, strlen(TxBuff));
