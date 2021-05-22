@@ -296,6 +296,7 @@ int32_t speed_to_tics (uint8_t speed);
 int8_t tics_to_speed (uint32_t tics);
 int16_t internal_tics_to_speedx100 (uint32_t tics);
 int16_t external_tics_to_speedx100 (uint32_t tics);
+int16_t q31_degree_to_degree(q31_t q31_degree);
 
 
 static uint8_t ui8_pwm_enabled_flag = 0;
@@ -1640,17 +1641,19 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 	//extrapolate recent rotor position
 	ui16_tim2_recent = __HAL_TIM_GET_COUNTER(&htim2); // read in timertics since last event
                 
-    //if(ui16_tim2_recent > ui16_timertics + (ui16_timertics >> 2))  // ui16_timertics * 5/4 was too sensitive
-    if(ui16_tim2_recent > (ui16_timertics * 2) )       
-    {
-        disable_pwm();
-        enum_motor_error_state = MOTOR_STATE_BLOCKED;
-        ui8_motor_error_state_hall_count = 10;
-    }
 
     if(MS.hall_angle_detect_flag)
     {   
         //autodetect is not active
+    
+        // Motor Blocked error
+        //if(ui16_tim2_recent > ui16_timertics + (ui16_timertics >> 2))  // ui16_timertics * 5/4 was too sensitive
+        if(ui16_tim2_recent > (ui16_timertics * 2) )       
+        {
+            disable_pwm();
+            enum_motor_error_state = MOTOR_STATE_BLOCKED;
+            ui8_motor_error_state_hall_count = 10;
+        }
 
         switch(enum_hall_angle_state)
         {
@@ -2238,19 +2241,38 @@ static void set_inj_channel(char state){
 
 }
 
-void autodetect(){
-	SET_BIT(TIM1->BDTR, TIM_BDTR_MOE);
-   	MS.hall_angle_detect_flag=0; //set uq to contstant value in FOC.c for open loop control
-   	q31_rotorposition_absolute=1<<31;
-   	uint8_t zerocrossing=0;
-   	q31_t diffangle=0;
+void autodetect()
+{
+    printf_("\nAUTODETECT\n");
+   	MS.hall_angle_detect_flag = 0;
+    // effects of hall_angle_detect_flag = 0
+    //  - q31_rotorposition_absolute is not updated in HAL_ADCEx_InjectedConvCpltCallback
+    //  - ui8_hall_state_old is not set in HAL_GPIO_EXTI_Callback (no sure if this is necessary)
+    //  - runPIcontrol: does nothing and returns immediately (open loop control -> u_d is set in this function)
+
+   	q31_rotorposition_absolute = DEG_plus180;
+   	uint8_t zerocrossing = 0;  // nulldurchgang
+   	q31_t diffangle = 0;
+    //
+    MS.u_q = 0;
+    MS.u_d = 250;
+    MS.foc_alpha = 0;
+    enable_pwm();
+    //
    	HAL_Delay(5);
-   	for(i=0;i<1080;i++){
-   		q31_rotorposition_absolute+=11930465; //drive motor in open loop with steps of 1°
+   	for(i = 0; i < 1080; i++)
+    {
+   		q31_rotorposition_absolute += 11930465; //drive motor in open loop with steps of 1°
    		HAL_Delay(5);
-   		if (q31_rotorposition_absolute>-60&&q31_rotorposition_absolute<300){
+   		if (q31_rotorposition_absolute > -60 && q31_rotorposition_absolute < 300)
+        {
+            // the rotor is at zero degrees absolute position
+            // ui8_hall_case -> the last recorded hall transition
+            // zerocrossing -> the next expected hall transition
+            // example: after the transition 64, the transition 45 should follow
+            // diffangle: angle of the 'zerocrossing' hall event
    			switch (ui8_hall_case) //12 cases for each transition from one stage to the next. 6x forward, 6x reverse
-   						{
+   		        {
    					//6 cases for forward direction
    					case 64:
    						zerocrossing = 45;
@@ -2304,32 +2326,24 @@ void autodetect(){
    						break;
 
    					} // end case
-
-
    		}
 
-   		if(ui8_hall_state_old!=ui8_hall_state){
-   		printf_("angle: %d, hallstate:  %d, hallcase %d \n",(int16_t)(((q31_rotorposition_absolute>>23)*180)>>8), ui8_hall_state , ui8_hall_case);
+   		if(ui8_hall_state_old != ui8_hall_state)
+        {
+       		ui8_hall_state_old = ui8_hall_state;
+   		    printf_("angle: %d, hallstate:  %d, hallcase %d \n", q31_degree_to_degree(q31_rotorposition_absolute), ui8_hall_state , ui8_hall_case);
 
-   		if(ui8_hall_case==zerocrossing)
-   		{
-   			q31_rotorposition_motor_specific = q31_rotorposition_absolute-diffangle-(1<<31);
-   			printf_("   ZEROCROSSING: angle: %d, hallstate:  %d, hallcase %d \n",(int16_t)(((q31_rotorposition_motor_specific>>23)*180)>>8), ui8_hall_state , ui8_hall_case);
-   		}
-
-
-   		ui8_hall_state_old=ui8_hall_state;
+   		    if(ui8_hall_case == zerocrossing)
+   		    {
+   		    	//q31_rotorposition_motor_specific = q31_rotorposition_absolute-diffangle-(1<<31);
+   		    	q31_rotorposition_motor_specific = q31_rotorposition_absolute - diffangle - DEG_plus180;
+   		    	printf_("   ZEROCROSSING: angle: %d, hallstate:  %d, hallcase %d \n", q31_degree_to_degree(q31_rotorposition_absolute), ui8_hall_state , ui8_hall_case);
+   		    }
    		}
    	}
-   	CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE); //Disable PWM if motor is not turning
-    TIM1->CCR1 = 1023; //set initial PWM values
-    TIM1->CCR2 = 1023;
-    TIM1->CCR3 = 1023;
+    MS.u_d = 0;
+    disable_pwm();
     MS.hall_angle_detect_flag=1;
-    MS.i_d = 0;
-    MS.i_q = 0;
-    uint32_tics_filtered=1000000;
-
 
     HAL_FLASH_Unlock();
     EE_WriteVariable(EEPROM_POS_SPEC_ANGLE, q31_rotorposition_motor_specific>>16);
@@ -2346,8 +2360,7 @@ void autodetect(){
 
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
-    printf_("Motor specific angle:  %d, direction %d \n ", (int16_t)(((q31_rotorposition_motor_specific>>23)*180)>>8), i16_hall_order);
-	printf_("benno: %d\n", q31_rotorposition_motor_specific);
+    printf_("Motor specific angle:  %d (q31_degree), %d (degree), direction %d \n ", q31_rotorposition_motor_specific, q31_degree_to_degree(q31_rotorposition_motor_specific), i16_hall_order);
 #endif
 
     HAL_Delay(5);
@@ -2399,6 +2412,11 @@ int16_t internal_tics_to_speedx100 (uint32_t tics){
 
 int16_t external_tics_to_speedx100 (uint32_t tics){
 	return WHEEL_CIRCUMFERENCE*8*360/(PULSES_PER_REVOLUTION*tics);;
+}
+
+int16_t q31_degree_to_degree(q31_t q31_degree)
+{
+    return ((q31_degree >> 23) * 180) >> 8;
 }
 
 
@@ -2756,10 +2774,13 @@ static void i_d_control()
 
 void runPIcontrol()
 {
+    if(MS.hall_angle_detect_flag == 0)
+    {
+        return;
+    }
     
     i_q_control();
     i_d_control();
-    PI_flag = 0;
     
     // testing - directly setting duty cycle
     /*if(DD.go)
@@ -2784,6 +2805,7 @@ void runPIcontrol()
         }
     }*/
 
+    PI_flag = 0;
 }
 
 /*void runPIcontrol2(){
