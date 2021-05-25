@@ -100,7 +100,34 @@ void DisplayDebug_Service(DISPLAY_DEBUG_t *DD_ctx)
     Buff[bytes_received] = '\0';
 
 
-    if(strncmp(Buff, "go", DEBUG_SIZE_RX_DMA_BUFFER) == 0)
+    if (strncmp((char *) Buff, "TOGGLE ", 7) == 0)
+    {
+        // serialize bluetooth app -> select the signal to plot
+        switch ((char) Buff[7])
+        {
+            case '1':
+                DD_ctx->ui16_value2 = 1;
+                break;
+            case '2': 
+                DD_ctx->ui16_value2 = 2;
+                break;
+            case '3':
+                DD_ctx->ui16_value2 = 3;
+                break;
+            case '4': 
+                DD_ctx->ui16_value2 = 4;
+                break;
+            case '5':
+                DD_ctx->ui16_value2 = 5;
+                break;
+            case '6': 
+                DD_ctx->ui16_value2 = 6;
+                break;
+            default:
+                break;
+        }
+    }
+    else if(strncmp(Buff, "go", DEBUG_SIZE_RX_DMA_BUFFER) == 0)
     {
         DD_ctx->go = !(DD_ctx->go);
         if(DD_ctx->go)
@@ -140,6 +167,7 @@ void DisplayDebug_Service(DISPLAY_DEBUG_t *DD_ctx)
     {
         DD_ctx->log = !(DD_ctx->log);
         do_log = DD_ctx->log;
+        ui8_UART_TxCplt_flag = 1;
         if(DD_ctx->log)
         {
             strcpy(TxBuff, "log on\n");
@@ -154,6 +182,7 @@ void DisplayDebug_Service(DISPLAY_DEBUG_t *DD_ctx)
     else if(strncmp(Buff, "hello", DEBUG_SIZE_RX_DMA_BUFFER) == 0)
     {
         strcpy(TxBuff, "hello\n");
+        ui8_UART_TxCplt_flag = 1;
         debug_print2(TxBuff, 6);
     }
     else if(strncmp(Buff, "light", DEBUG_SIZE_RX_DMA_BUFFER) == 0)

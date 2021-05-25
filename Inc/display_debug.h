@@ -1,3 +1,7 @@
+
+#ifndef _DISPLAY_DEBUG_H
+#define _DISPLAY_DEBUG_H
+
 #include "config.h"
 
 #define DEBUG_SIZE_RX_DMA_BUFFER 40
@@ -18,3 +22,6 @@ void DisplayDebug_Init(DISPLAY_DEBUG_t *DD_ctx);
 void DisplayDebug_Service(DISPLAY_DEBUG_t *DD_ctx);
 
 void debug_print(char* data, uint16_t size);
+
+
+#endif //#define _DISPLAY_DEBUG_H

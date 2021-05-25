@@ -965,38 +965,34 @@ int main(void)
 		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
 		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
-
+        
+        
         switch (DD.ui16_value2)
         {
         case 1:
-        {
-            uint16_t velocity_kmh = 2234 * 50 * 36 / (6 * GEAR_RATIO * (uint32_tics_filtered>>3));
-            sprintf_(buffer,"%u\n", velocity_kmh);
-            break;
-        }
+            {
+                uint16_t velocity_kmh = 2234 * 50 * 36 / (6 * GEAR_RATIO * (uint32_tics_filtered>>3));
+                sprintf_(buffer,"Graph:%u$", velocity_kmh);
+                break;
+            }
         case 2:
-            sprintf_(buffer,"%u\n", (uint16_t) TemperatureData.q31_temperature_degrees);
+            sprintf_(buffer,"Graph:%u|%u$", (uint16_t) TemperatureData.q31_temperature_degrees, (uint16_t) (BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
             break;
         case 3:
-            sprintf_(buffer,"%u\n", (uint16_t) BatteryVoltageData.q31_battery_voltage_V_x10);
+            sprintf_(buffer,"Graph:%u$", (uint16_t) MS.u_q);
             break;
         case 4:
-            sprintf_(buffer,"%u\n", (uint16_t) MS.u_q);
+            sprintf_(buffer,"Graph:%u$", (uint16_t) q31_degree_to_degree(MS.foc_alpha));
             break;
         case 5:
-            sprintf_(buffer,"%u\n", (uint16_t) q31_degree_to_degree(MS.foc_alpha));
-            break;
-        case 6:
-            sprintf_(buffer,"%u\n", (uint16_t) CurrentData.q31_battery_current_mA / 100);
-            break;
-        case 7:
-        {
-            uint32_t phase_current = CurrentData.q31_battery_current_mA / 100;
-            phase_current = phase_current * 4 * _T / (3 * MS.u_q);
-            sprintf_(buffer,"%u\n", (uint16_t) phase_current);        
-            break;
-        }
+            {
+                uint32_t phase_current_x10 = CurrentData.q31_battery_current_mA / 100;
+                phase_current_x10 = phase_current_x10 * 4 * _T / (3 * MS.u_q);
+                sprintf_(buffer,"Graph:%u|%u$", (uint16_t) CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+                break;
+            }
         default:
+            sprintf_(buffer,"");
             break;
         }
 
@@ -1006,12 +1002,13 @@ int main(void)
         if(slow_loop_print_counter == 0)
         {
             //sprintf_(buffer, "%d\n", MS.u_q);
-            if(ui8_UART_TxCplt_flag && DD.log)
+            //if(ui8_UART_TxCplt_flag && DD.log)
+            if(ui8_UART_TxCplt_flag && DD.ui16_value2 > 0)
             {
 		        HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
                 ui8_UART_TxCplt_flag = 0;
             }
-            slow_loop_print_counter = 8;
+            slow_loop_print_counter = 4;
         }
         else
         {
@@ -2546,8 +2543,8 @@ static q31_t get_target_power()
 #if (DISPLAY_TYPE == DISPLAY_TYPE_AUREUS)
         uint32_t pas_omega_x10 = (2285 * (DA.Rx.AssistLevel >> 3)) / uint32_PAS;                // including the assistfactor x10
 #else
-        //uint32_t pas_omega_x10 = (2285 * (10)) / uint32_PAS;                // including the assistfactor x10
-        uint32_t pas_omega_x10 = (2285 * (DD.ui16_value)) / uint32_PAS;                // including the assistfactor x10
+        uint32_t pas_omega_x10 = (2285 * (28)) / uint32_PAS;                // including the assistfactor x10
+        //uint32_t pas_omega_x10 = (2285 * (DD.ui16_value)) / uint32_PAS;                // including the assistfactor x10
 #endif
         //uint32_t pas_omega_x10 = (2285 * (1.0)) / PAS_mod;                // including the assistfactor x10
     	//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again

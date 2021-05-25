@@ -1,3 +1,8 @@
+
+#ifndef _DISPLAY_AUREUS_H
+#define _DISPLAY_AUREUS_H
+
+
 #include "config.h"
 
 //#define AUREUS_SIZE_RX_SETTINGS 15
@@ -44,3 +49,6 @@ typedef struct
 void Aureus_UART_IdleItCallback(void);
 void DisplayAureus_Init(DISPLAY_AUREUS_t* DA_ctx);
 void DisplayAureus_Service(DISPLAY_AUREUS_t* DA_ctx);
+
+
+#endif  //#define _DISPLAY_AUREUS_H
