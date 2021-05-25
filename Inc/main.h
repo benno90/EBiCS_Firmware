@@ -103,13 +103,13 @@ int32_t map (int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t
 void autodetect();
 void runPIcontrol();
 
-void My_UART_IdleItCallback(void);
+void UART_IdleItCallback(void);
 
 extern uint16_t switchtime[3];
 extern uint32_t ui32_tim1_counter;
 extern uint32_t uint32_PAS_counter;
 
-extern volatile uint8_t ui8_UART_TxCplt_flag;
+extern volatile uint8_t ui8_g_UART_TxCplt_flag;
 
 typedef struct
 {
@@ -139,21 +139,28 @@ typedef struct
 
 	//q31_t       	Voltage;   -> use BatteryVoltageData..
 	uint32_t       	Speed;
+    uint16_t        ui16_wheel_time_ms;
+    uint8_t         ui8_lights;
 	q31_t          	i_d;
 	q31_t          	i_q;
 	q31_t          	u_d;
 	q31_t          	u_q;
     q31_t           foc_alpha;
 	q31_t          	u_abs;
-	//q31_t          	Battery_Current; -> use CurrentData
+	q31_t          	q31_battery_current_mA;
 	uint8_t 		hall_angle_detect_flag;
 	uint8_t 		char_dyn_adc_state;
-	uint8_t 		assist_level;
+	uint8_t 		ui8_assist_level;
 	uint8_t 		regen_level;
 	//uint32_t        Temperature;  -> use TemperatureData..
 	int8_t         	system_state;
 	int8_t         	gear_state;
 	int8_t         	error_state;
+    //
+    uint16_t        ui16_dbg_value;
+    uint16_t        ui16_dbg_value2;
+    uint8_t         ui8_go;
+    uint8_t         ui8_log;
 
 }MotorState_t;
 

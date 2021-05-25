@@ -54,32 +54,7 @@
 #include "FOC.h"
 #include "config.h"
 #include "eeprom.h"
-
-
-#if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
-  #include "display_kingmeter.h"
-#endif
-
-#if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
-  #include "display_aureus.h"
-#endif
-
-#if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
-  #include "display_debug.h"
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
-  #include "display_bafang.h"
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_KUNTENG)
-  #include "display_kunteng.h"
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_EBiCS)
-  #include "display_ebics.h"
-#endif
-
+#include "display_base.h"
 
 #include <arm_math.h>
 /* USER CODE END Includes */
@@ -136,9 +111,8 @@ int8_t i8_direction= REVERSE; //for permanent reverse direction
 int8_t i8_reverse_flag = 1; //for temporaribly reverse direction
 
 volatile uint8_t ui8_adc_offset_done_flag=0;
-volatile uint8_t ui8_UART_flag=0;
 volatile uint8_t ui8_Push_Assist_flag=0;
-volatile uint8_t ui8_UART_TxCplt_flag=1;
+volatile uint8_t ui8_g_UART_TxCplt_flag=1;
 volatile uint8_t ui8_PAS_flag=0;
 volatile uint8_t ui8_SPEED_flag=0;
 volatile uint8_t ui8_SPEED_control_flag=0;
@@ -199,32 +173,6 @@ uint32_t uint32_tics_filtered = HALL_TIMEOUT << 3;
 uint16_t VirtAddVarTab[NB_OF_VAR] = {0x01, 0x02, 0x03};
 
 
-//variables for display communication
-#if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
-KINGMETER_t KM;
-#endif
-
-#if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
-DISPLAY_AUREUS_t DA;
-#endif
-
-#if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
-DISPLAY_DEBUG_t DD;
-#endif
-
-//variables for display communication
-#if (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
-BAFANG_t BF;
-#endif
-
-#if (DISPLAY_TYPE & DISPLAY_TYPE_EBiCS)
-uint8_t ui8_main_LEV_Page_counter=0;
-uint8_t ui8_additional_LEV_Page_counter=0;
-uint8_t ui8_LEV_Page_to_send=1;
-#endif
-
-
-
 MotorState_t MS;
 MotorParams_t MP;
 CurrentData_t CurrentData;
@@ -280,13 +228,6 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
-#if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
-void kingmeter_update(void);
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
-void bafang_update(void);
-#endif
 
 static void dyn_adc_state(q31_t angle);
 static void set_inj_channel(char state);
@@ -371,7 +312,7 @@ int main(void)
   //initialize MS struct.
   MS.hall_angle_detect_flag=1;
   MS.Speed=128000;
-  MS.assist_level=1;
+  MS.ui8_assist_level=1;
   MS.regen_level=7;
   MP.pulses_per_revolution = PULSES_PER_REVOLUTION;
   MP.wheel_cirumference = WHEEL_CIRCUMFERENCE;
@@ -488,37 +429,7 @@ int main(void)
               Error_Handler();
             }
 
-#if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
-			DisplayAureus_Init(&DA);
-#endif
-
-#if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
-			DisplayDebug_Init(&DD);
-    DD.go = 0;
-    DD.log = 0;
-    DD.light = 0;
-    DD.ui16_value = 0;
-    DD.ui16_value2 = 0;
-            
-#endif
-
-#if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
-       KingMeter_Init (&KM);
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
-       Bafang_Init (&BF);
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_KUNTENG)
-       kunteng_init();
-       check_message(&MS, &MP);
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_EBiCS)
-       ebics_init();
-#endif
-
+    Display_Init(&MS);
 
     TIM1->CCR1 = 1023; //set initial PWM values
     TIM1->CCR2 = 1023;
@@ -608,205 +519,137 @@ int main(void)
 	get_standstill_position();
 
 
-  /* USER CODE END 2 */
+    /* USER CODE END 2 */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-
-    if(PI_flag || !ui8_pwm_enabled_flag)
+    /* Infinite loop */
+    /* USER CODE BEGIN WHILE */
+    while (1)
     {
-        // only pi control can enable the pwm
-        runPIcontrol();
-    }
 
-	  //display message processing
-	  if(ui8_UART_flag){
-	  //{
-#if (DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
-		// period [s] = tics x 6 x GEAR_RATIO / frequency    (frequency = 500kHz)
-		//DA.Tx.Wheeltime_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / 500;
-        // 05.05.21 -> 20% error ?! -> x 6/5      using 23 /20 = 1.15 
-		DA.Tx.Wheeltime_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO * 6 / (500 * 5);
-		if(DA.Tx.Wheeltime_ms > 0x0DAC)
-		{
-			DA.Tx.Wheeltime_ms = 0x0DAC;
-		}
-
-        DA.Tx.Current_A_x3 = (uint16_t) CurrentData.q31_battery_current_mA / 333;
-
-		DisplayAureus_Service(&DA);
-		if(DA.Rx.Headlight)
-		{
-   		    HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_SET);
-        	//HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-		}
-		else
-		{
-   		    HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_RESET);
-		}
-
-        switch(enum_motor_error_state)
+        if(PI_flag || !ui8_pwm_enabled_flag)
         {
-            case MOTOR_STATE_NORMAL:
-                DA.Tx.Error = 0;
-                break;
-            case MOTOR_STATE_BLOCKED:
-                DA.Tx.Error = 0x21;
-                //DA.Tx.Error = 0;
-                break;
-            case MOTOR_STATE_PLL_ERROR:
-                DA.Tx.Error = 0x22;
-                break;
-            default:
-                break;
+            // only pi control can enable the pwm
+            runPIcontrol();
         }
-  
-		  
-#endif
 
-#if (DISPLAY_TYPE & DISPLAY_TYPE_DEBUG)
-		DisplayDebug_Service(&DD);
-        
-#ifdef FAST_LOOP_LOG
-        if(DD.ui16_value2 > 0)
+	    //display message processing
+	    if(ui8_g_UART_Rx_flag)
         {
-            ui8_fast_loop_log_state = 1;
-            DD.ui16_value2 = 0;
-        }
-#endif
+		    // period [s] = tics x 6 x GEAR_RATIO / frequency    (frequency = 500kHz)
+		    //DA.Tx.Wheeltime_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / 500;
+            // 05.05.21 -> 20% error ?! -> x 6/5      using 23 /20 = 1.15 
+            MS.ui16_wheel_time_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO * 6 / (500 * 5);
 
-		if(DD.light)
-		{
-   		    HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_SET);
-        	//HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-		}
-		else
-		{
-   		    HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_RESET);
-		}
-#endif
+            MS.q31_battery_current_mA = CurrentData.q31_battery_current_mA;
+            MS.error_state = enum_motor_error_state; // todo -> move enum_motor_error_state into MS
+
+            Display_Service(&MS);
 
 
-#if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
-	  kingmeter_update();
-#endif
-
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
-	  bafang_update();
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_KUNTENG)
-	  check_message(&MS, &MP);
-	  if(MS.assist_level==6)ui8_Push_Assist_flag=1;
-	  else ui8_Push_Assist_flag=0;
-#endif
-
-#if (DISPLAY_TYPE & DISPLAY_TYPE_EBiCS)
-	  process_ant_page(&MS, &MP);
-#endif
-
-	  ui8_UART_flag=0;
-	  } // end UART processing
-
-
-    // --------------------------------------------------
-	// PAS signal processing
-	//
-	  
-    if(ui8_PAS_flag)
-    {
-		if(uint32_PAS_counter>100)
-        { 
-            //debounce
-		    uint32_PAS_cumulated -= uint32_PAS_cumulated>>2;
-		    uint32_PAS_cumulated += uint32_PAS_counter;
-		    uint32_PAS = uint32_PAS_cumulated>>2;
-	        uint32_PAS_raw = uint32_PAS_counter;
-
-    	    uint32_PAS_HIGH_accumulated-=uint32_PAS_HIGH_accumulated>>2;
-		    uint32_PAS_HIGH_accumulated+=uint32_PAS_HIGH_counter;
-
-		    uint32_PAS_fraction=(uint32_PAS_HIGH_accumulated>>2)*100/uint32_PAS;
-		    uint32_PAS_HIGH_counter=0;
-		    uint32_PAS_counter =0;
-		    ui8_PAS_flag=0;
-		    //read in and sum up torque-signal within one crank revolution (for sempu sensor 32 PAS pulses/revolution, 2^5=32)
-
-		    //uint32_torque_cumulated -= uint32_torque_cumulated >> 5;
-            //uint32_torque_cumulated += ui16_reg_adc_value;
-
-            uint32_t ui32_reg_adc_value_shifted = ui16_reg_adc_value << 4;
-
-            if(ui32_reg_adc_value_shifted > uint32_torque_cumulated)
-            {
-                // accept rising values unfiltered
-                uint32_torque_cumulated = ui32_reg_adc_value_shifted;
-            }
+            if(MS.ui8_lights)
+   		        HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_SET);   // LED_Pin?
             else
+   		        HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_RESET);
+
+	        ui8_g_UART_Rx_flag=0;
+
+	    } // end UART processing
+
+        
+        
+        // --------------------------------------------------
+        // PAS signal processing
+        //
+
+        if (ui8_PAS_flag)
+        {
+            if (uint32_PAS_counter > 100)
             {
-                // filter falling values
-		        uint32_torque_cumulated -= uint32_torque_cumulated >> 4;
-                uint32_torque_cumulated += ui16_reg_adc_value;
+                //debounce
+                uint32_PAS_cumulated -= uint32_PAS_cumulated >> 2;
+                uint32_PAS_cumulated += uint32_PAS_counter;
+                uint32_PAS = uint32_PAS_cumulated >> 2;
+                uint32_PAS_raw = uint32_PAS_counter;
+
+                uint32_PAS_HIGH_accumulated -= uint32_PAS_HIGH_accumulated >> 2;
+                uint32_PAS_HIGH_accumulated += uint32_PAS_HIGH_counter;
+
+                uint32_PAS_fraction = (uint32_PAS_HIGH_accumulated >> 2) * 100 / uint32_PAS;
+                uint32_PAS_HIGH_counter = 0;
+                uint32_PAS_counter = 0;
+                ui8_PAS_flag = 0;
+                //read in and sum up torque-signal within one crank revolution (for sempu sensor 32 PAS pulses/revolution, 2^5=32)
+
+                //uint32_torque_cumulated -= uint32_torque_cumulated >> 5;
+                //uint32_torque_cumulated += ui16_reg_adc_value;
+
+                uint32_t ui32_reg_adc_value_shifted = ui16_reg_adc_value << 4;
+
+                if (ui32_reg_adc_value_shifted > uint32_torque_cumulated)
+                {
+                    // accept rising values unfiltered
+                    uint32_torque_cumulated = ui32_reg_adc_value_shifted;
+                }
+                else
+                {
+                    // filter falling values
+                    uint32_torque_cumulated -= uint32_torque_cumulated >> 4;
+                    uint32_torque_cumulated += ui16_reg_adc_value;
+                }
             }
-	    }
-    }
+        }
 
-	if(uint32_PAS_counter >= PAS_TIMEOUT)
-	{
-	    uint32_PAS = PAS_TIMEOUT;
-		uint32_PAS_raw = PAS_TIMEOUT;
-		uint32_PAS_cumulated = PAS_TIMEOUT << 2;
-		uint32_torque_cumulated = 0;
-	}
+        if (uint32_PAS_counter >= PAS_TIMEOUT)
+        {
+            uint32_PAS = PAS_TIMEOUT;
+            uint32_PAS_raw = PAS_TIMEOUT;
+            uint32_PAS_cumulated = PAS_TIMEOUT << 2;
+            uint32_torque_cumulated = 0;
+        }
 
-	if(uint32_PAS_raw >= PAS_TIMEOUT)
-	{
-	    uint8_pedaling = 0;
-	}
-	else
-	{
-		uint8_pedaling = 1;
-	}
+        if (uint32_PAS_raw >= PAS_TIMEOUT)
+        {
+            uint8_pedaling = 0;
+        }
+        else
+        {
+            uint8_pedaling = 1;
+        }
 
+        // --------------------------------------------------
+        // SPEED signal processing
+        //
 
-    
-    // --------------------------------------------------
-	// SPEED signal processing
-    //
+        if (ui8_SPEED_flag)
+        { // benno: this part seems to be for the external sensor
 
-	  if(ui8_SPEED_flag){   // benno: this part seems to be for the external sensor
-
-		  if(uint32_SPEED_counter>200){ //debounce
-		  MS.Speed = uint32_SPEED_counter;
-		  //HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-		  uint32_SPEED_counter =0;
-		  ui8_SPEED_flag=0;
+            if (uint32_SPEED_counter > 200)
+            { //debounce
+                MS.Speed = uint32_SPEED_counter;
+                //HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+                uint32_SPEED_counter = 0;
+                ui8_SPEED_flag = 0;
 
 #if (SPEEDSOURCE == EXTERNAL)
-		uint32_SPEEDx100_cumulated -=uint32_SPEEDx100_cumulated>>SPEEDFILTER;
-		uint32_SPEEDx100_cumulated +=external_tics_to_speedx100(MS.Speed);
+                uint32_SPEEDx100_cumulated -= uint32_SPEEDx100_cumulated >> SPEEDFILTER;
+                uint32_SPEEDx100_cumulated += external_tics_to_speedx100(MS.Speed);
 #endif
+            }
+        }
 
-		  }
-	  }
-
-	if(ui8_SPEED_control_flag)
-    {
+        if (ui8_SPEED_control_flag)
+        {
 #if (SPEEDSOURCE == INTERNAL)
-		uint32_SPEEDx100_cumulated -= uint32_SPEEDx100_cumulated >> SPEEDFILTER;
-		uint32_SPEEDx100_cumulated += internal_tics_to_speedx100(uint32_tics_filtered >> 3);
+            uint32_SPEEDx100_cumulated -= uint32_SPEEDx100_cumulated >> SPEEDFILTER;
+            uint32_SPEEDx100_cumulated += internal_tics_to_speedx100(uint32_tics_filtered >> 3);
 #endif
-		ui8_SPEED_control_flag=0;
-	} // end speed processing
+            ui8_SPEED_control_flag = 0;
+        } // end speed processing
 
-
-//------------------------------------------------------------------------------------------------------------
+        //------------------------------------------------------------------------------------------------------------
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && defined(FAST_LOOP_LOG))
-		if(ui8_fast_loop_log_state == 2 && ui8_UART_TxCplt_flag)
+		if(ui8_fast_loop_log_state == 2 && ui8_g_UART_TxCplt_flag)
         {
             if(k < FAST_LOOP_LOG_SIZE)
             {
@@ -816,7 +659,7 @@ int main(void)
                 {
 			        i++;
                 }
-			    ui8_UART_TxCplt_flag=0;
+			    ui8_g_UART_TxCplt_flag=0;
 			    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, i);
 			    k++;
             }
@@ -829,61 +672,31 @@ int main(void)
 		}
 #endif
 
-//--------------------------------------------------------------------------------------------------------------------------------------------------
-    
-    //current target calculation (removed 02.05.21)
-
-    // code blelow is unused, just left it for reference
-
-//------------------------------------------------------------------------------------------------------------
-				//enable PWM if power is wanted
-		int32_current_target = 0;  // xx
-        //int32_current_target = DD.go;
-        // todo - remove code below
-	    if (int32_current_target>0&&!READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
+        //----------------------------------------------------------------------------------------------------------------------------------------------------------
+        //slow loop procedere @16Hz, for LEV standard every 4th loop run, send page,
+        if (ui32_tim3_counter > 500)
         {
-		    //speed_PLL(0,0);//reset integral part
 
-		    uint16_half_rotation_counter=0;
-		    uint16_full_rotation_counter=0;
-		    TIM1->CCR1 = 1023; //set initial PWM values
-		    TIM1->CCR2 = 1023;
-		    TIM1->CCR3 = 1023;
-		    SET_BIT(TIM1->BDTR, TIM_BDTR_MOE);
-		    __HAL_TIM_SET_COUNTER(&htim2,0); //reset tim2 counter
-		    ui16_timertics=20000; //set interval between two hallevents to a large value
-		    i8_recent_rotor_direction=i8_direction*i8_reverse_flag;
-		    get_standstill_position();
-	    }
+            if (ui16_motor_init_state_timeout > 0)
+            {
+                --ui16_motor_init_state_timeout;
+            }
 
-
-//----------------------------------------------------------------------------------------------------------------------------------------------------------
-	  //slow loop procedere @16Hz, for LEV standard every 4th loop run, send page,
-	  if(ui32_tim3_counter>500){
-
-          if(ui16_motor_init_state_timeout > 0)
-          {
-              --ui16_motor_init_state_timeout;
-          }
-
-            if(slow_loop_counter == 0)
+            if (slow_loop_counter == 0)
             {
                 // 1Hz process frequency for battery voltage and chip temperature
                 // storing raw adc data
-
 
                 // ---------------------------------------
                 // process battery voltage
                 BatteryVoltageData.q31_battery_voltage_adc_cumulated -= (BatteryVoltageData.q31_battery_voltage_adc_cumulated >> BatteryVoltageData.ui8_shift);
                 BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
-                BatteryVoltageData.q31_battery_voltage_V_x10 = 
+                BatteryVoltageData.q31_battery_voltage_V_x10 =
                     (BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> BatteryVoltageData.ui8_shift;
-          
-          
 
                 // ---------------------------------------
                 // process temperature
-                
+
                 TemperatureData.q31_temperature_adc_cumulated -= (TemperatureData.q31_temperature_adc_cumulated >> TemperatureData.ui8_shift);
                 TemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
 
@@ -894,10 +707,10 @@ int main(void)
 
                 // recover voltage (3.3V  ref voltage, 2^12 = 4096)
                 // int32_t v_temp = adcData[TEMP_ADC_INDEX] * 3300 >> 12; // voltage in mV
-                int32_t v_temp = (TemperatureData.q31_temperature_adc_cumulated >> TemperatureData.ui8_shift) * 3300 >> 12;   // voltage in mV
-                // 
+                int32_t v_temp = (TemperatureData.q31_temperature_adc_cumulated >> TemperatureData.ui8_shift) * 3300 >> 12; // voltage in mV
+                //
                 v_temp = (1430 - v_temp) * 10 / 43 + 25;
-                if(v_temp > 0)
+                if (v_temp > 0)
                 {
                     TemperatureData.q31_temperature_degrees = v_temp;
                 }
@@ -905,154 +718,96 @@ int main(void)
                 {
                     TemperatureData.q31_temperature_degrees = 0;
                 }
-
             }
             else
             {
                 slow_loop_counter = 16;
             }
-            
 
-
-
-		  if(uint32_SPEED_counter>127999){
-			  MS.Speed =128000;
+            if (uint32_SPEED_counter > 127999)
+            {
+                MS.Speed = 128000;
 #if (SPEEDSOURCE == EXTERNAL)
-			  uint32_SPEEDx100_cumulated=0;
+                uint32_SPEEDx100_cumulated = 0;
 #endif
-		  }
-
-#ifdef INDIVIDUAL_MODES
-		  // GET recent speedcase for assist profile
-		  if (uint32_tics_filtered>>3 > speed_to_tics(assist_profile[0][1]))ui8_speedcase=0;
-		  else if (uint32_tics_filtered>>3 < speed_to_tics(assist_profile[0][1]) && uint32_tics_filtered>>3 > speed_to_tics(assist_profile[0][2]))ui8_speedcase=1;
-		  else if (uint32_tics_filtered>>3 < speed_to_tics(assist_profile[0][2]) && uint32_tics_filtered>>3 > speed_to_tics(assist_profile[0][3]))ui8_speedcase=2;
-		  else if (uint32_tics_filtered>>3 < speed_to_tics(assist_profile[0][3]) && uint32_tics_filtered>>3 > speed_to_tics(assist_profile[0][4]))ui8_speedcase=3;
-		  else if (uint32_tics_filtered>>3 < speed_to_tics(assist_profile[0][4]))ui8_speedcase=4;
-
-		  ui8_speedfactor = map(uint32_tics_filtered>>3,speed_to_tics(assist_profile[0][ui8_speedcase+1]),speed_to_tics(assist_profile[0][ui8_speedcase]),assist_profile[1][ui8_speedcase+1],assist_profile[1][ui8_speedcase]);
-
-
-#endif
-
-
-		  //if((uint16_full_rotation_counter>7999||uint16_half_rotation_counter>7999)&&READ_BIT(TIM1->BDTR, TIM_BDTR_MOE)){
-
-              // todo: check if this is still necessary
-			  //CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE); //Disable PWM if motor is not turning
-			  //uint32_tics_filtered=1000000;
-			  //get_standstill_position();
-
-		  //}
+            }
 
 //#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && !defined(FAST_LOOP_LOG))
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
-    
-		  //print values for debugging
 
+            //print values for debugging
 
-		//uint32_t pas_omega = 2285 / uint32_PAS;
-		//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
-		//uint16_t pedal_power = pas_omega * torque_nm;
-        //sprintf_(buffer, "%d %d\n", BatteryVoltageData.q31_battery_voltage_V_x10, TemperatureData.q31_temperature_degrees);
-        //sprintf_(buffer, "%d\n", TemperatureData.q31_temperature_degrees);
+            //uint32_t pas_omega = 2285 / uint32_PAS;
+            //uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
+            //uint16_t pedal_power = pas_omega * torque_nm;
+            //sprintf_(buffer, "%d %d\n", BatteryVoltageData.q31_battery_voltage_V_x10, TemperatureData.q31_temperature_degrees);
+            //sprintf_(buffer, "%d\n", TemperatureData.q31_temperature_degrees);
 
-        //q31_t batt_current_x10 = CurrentData.q31_battery_current_mA / 100;
-        //q31_t phase_current_x10 = ((4 * batt_current_x10) << 11) / (3 * MS.u_q);
-        //sprintf_(buffer, "%d | %d %d\n", MS.u_q, batt_current_x10, phase_current_x10);
+            //q31_t batt_current_x10 = CurrentData.q31_battery_current_mA / 100;
+            //q31_t phase_current_x10 = ((4 * batt_current_x10) << 11) / (3 * MS.u_q);
+            //sprintf_(buffer, "%d | %d %d\n", MS.u_q, batt_current_x10, phase_current_x10);
 
-		 //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
-		 //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
-		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
-		 // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
-        
-        
-        switch (DD.ui16_value2)
-        {
-        case 1:
+            //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
+            //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
+            // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
+            // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
+
+            switch (MS.ui16_dbg_value2)
             {
-                uint16_t velocity_kmh = 2234 * 50 * 36 / (6 * GEAR_RATIO * (uint32_tics_filtered>>3));
-                sprintf_(buffer,"Graph:%u$", velocity_kmh);
+            case 1:
+            {
+                uint16_t velocity_kmh = 2234 * 50 * 36 / (6 * GEAR_RATIO * (uint32_tics_filtered >> 3));
+                sprintf_(buffer, "Graph:%u$", velocity_kmh);
                 break;
             }
-        case 2:
-            sprintf_(buffer,"Graph:%u|%u$", (uint16_t) TemperatureData.q31_temperature_degrees, (uint16_t) (BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
-            break;
-        case 3:
-            sprintf_(buffer,"Graph:%u$", (uint16_t) MS.u_q);
-            break;
-        case 4:
-            sprintf_(buffer,"Graph:%u$", (uint16_t) q31_degree_to_degree(MS.foc_alpha));
-            break;
-        case 5:
+            case 2:
+                sprintf_(buffer, "Graph:%u|%u$", (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+                break;
+            case 3:
+                sprintf_(buffer, "Graph:%u$", (uint16_t)MS.u_q);
+                break;
+            case 4:
+                sprintf_(buffer, "Graph:%u$", (uint16_t)q31_degree_to_degree(MS.foc_alpha));
+                break;
+            case 5:
             {
                 uint32_t phase_current_x10 = CurrentData.q31_battery_current_mA / 100;
                 phase_current_x10 = phase_current_x10 * 4 * _T / (3 * MS.u_q);
-                sprintf_(buffer,"Graph:%u|%u$", (uint16_t) CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+                sprintf_(buffer, "Graph:%u|%u$", (uint16_t)CurrentData.q31_battery_current_mA / 100, phase_current_x10);
                 break;
             }
-        default:
-            sprintf_(buffer,"");
-            break;
-        }
-
-
-    if(ui8_fast_loop_log_state == 0)
-    {
-        if(slow_loop_print_counter == 0)
-        {
-            //sprintf_(buffer, "%d\n", MS.u_q);
-            //if(ui8_UART_TxCplt_flag && DD.log)
-            if(ui8_UART_TxCplt_flag && DD.ui16_value2 > 0)
-            {
-		        HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
-                ui8_UART_TxCplt_flag = 0;
+            default:
+                sprintf_(buffer, "");
+                break;
             }
-            slow_loop_print_counter = 4;
-        }
-        else
-        {
-            --slow_loop_print_counter;
-        }
-    }
-         
-#endif
 
-#if (DISPLAY_TYPE == DISPLAY_TYPE_EBiCS)
-		  ui8_slowloop_counter++;
-		  if(ui8_slowloop_counter>3){
-			  ui8_slowloop_counter = 0;
-
-			  switch (ui8_main_LEV_Page_counter){
-			  case 1: {
-				  ui8_LEV_Page_to_send = 1;
-			  	  }
-			  	  break;
-			  case 2: {
-				  ui8_LEV_Page_to_send = 2;
-			  	  }
-			  	  break;
-			  case 3: {
-				  ui8_LEV_Page_to_send = 3;
-			  	  }
-			  	  break;
-			  case 4: {
-				  //to do, define other pages
-				  ui8_LEV_Page_to_send = 4;
-			  	  }
-			  	  break;
-			  }//end switch
-
-			  send_ant_page(ui8_LEV_Page_to_send, &MS, &MP);
-
-			  ui8_main_LEV_Page_counter++;
-			  if(ui8_main_LEV_Page_counter>4)ui8_main_LEV_Page_counter=1;
-		  }
+            if (ui8_fast_loop_log_state == 0)
+            {
+                if (slow_loop_print_counter == 0)
+                {
+                    //sprintf_(buffer, "%d\n", MS.u_q);
+                    //if(ui8_UART_g_TxCplt_flag && DD.log)
+                    if (ui8_UART_g_TxCplt_flag && MS.ui16_dbg_value2 > 0)
+                    {
+                        HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
+                        ui8_UART_g_TxCplt_flag = 0;
+                    }
+                    slow_loop_print_counter = 4;
+                }
+                else
+                {
+                    --slow_loop_print_counter;
+                }
+            }
 
 #endif
-		  ui32_tim3_counter=0;
-          if(ui8_slowloop_counter > 0) --ui8_slowloop_counter;
-	  }// end of slow loop
+
+            ui32_tim3_counter = 0;
+            if (ui8_slowloop_counter > 0)
+            {
+                --ui8_slowloop_counter;
+            }
+        } // end of slow loop
 
   /* USER CODE END WHILE */
 
@@ -1441,17 +1196,7 @@ static void MX_USART1_UART_Init(void)
 {
 
   huart1.Instance = USART1;
-
-#if ((DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER) ||DISPLAY_TYPE==DISPLAY_TYPE_KUNTENG||DISPLAY_TYPE==DISPLAY_TYPE_EBiCS || DISPLAY_TYPE & DISPLAY_TYPE_AUREUS)
-  huart1.Init.BaudRate = 9600;
-#elif (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
-  huart1.Init.BaudRate = 1200;
-#else
-  //huart1.Init.BaudRate = 115200;
-  huart1.Init.BaudRate = 57600;
-#endif
-
-
+  huart1.Init.BaudRate = ui32_g_DisplayBaudRate;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -1859,7 +1604,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             }
     	}
     
-        //if(ui8_UART_TxCplt_flag)
+        //if(ui8_g_UART_TxCplt_flag)
         //{
         //    sprintf_(buffer, "%u %d\n", enum_hall_angle_state, q31_pll_abs_delta / 1193046);    // 11930464
         //    debug_print(buffer, strlen(buffer));
@@ -1978,178 +1723,22 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *UartHandle)
 {
-#if ( (DISPLAY_TYPE != DISPLAY_TYPE_AUREUS) && (DISPLAY_TYPE != DISPLAY_TYPE_DEBUG) ) // -> My_UART_IdleItCallback
-	ui8_UART_flag=1;
-#endif
-
-}
-
-void My_UART_IdleItCallback(void)
-{
-#if (DISPLAY_TYPE == DISPLAY_TYPE_AUREUS)
-	Aureus_UART_IdleItCallback();
-#elif (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
-	Debug_UART_IdleItCallback();
-#endif
+//#if ( (DISPLAY_TYPE != DISPLAY_TYPE_AUREUS) && (DISPLAY_TYPE != DISPLAY_TYPE_DEBUG) ) // -> UART_IdleItCallback
+//	ui8_UART_flag=1;
+//#endif
+//
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *UartHandle)
 {
-	ui8_UART_TxCplt_flag=1;
+	ui8_g_UART_TxCplt_flag=1;
 }
 
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *UartHandle) {
-#if (DISPLAY_TYPE == DISPLAY_TYPE_AUREUS)
-	DisplayAureus_Init(&DA);
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
-	DisplayDebug_Init(&DD);
-#endif
-
-#if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
-       KingMeter_Init (&KM);
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
-       Bafang_Init (&BF);
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_KUNTENG)
-       kunteng_init();
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_EBiCS)
-       ebics_init();
-#endif
-
-}
-
-
-
-#if (DISPLAY_TYPE & DISPLAY_TYPE_KINGMETER)
-void kingmeter_update(void)
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *UartHandle) 
 {
-    /* Prepare Tx parameters */
-
-    if(battery_percent_fromcapacity > 10)
-    {
-        KM.Tx.Battery = KM_BATTERY_NORMAL;
-    }
-    else
-    {
-        KM.Tx.Battery = KM_BATTERY_LOW;
-    }
-
-    if(__HAL_TIM_GET_COUNTER(&htim2) < 12000)
-    {
-        // Adapt wheeltime to match displayed speedo value according config.h setting
-    	KM.Tx.Wheeltime_ms = ((MS.Speed>>3)*PULSES_PER_REVOLUTION); //>>3 because of 8 kHz counter frequency, so 8 tics per ms
-    }
-    else
-    {
-        KM.Tx.Wheeltime_ms = 64000;
-    }
-
-
-    //KM.Tx.Wheeltime_ms = 25;
-
-    KM.Tx.Error = KM_ERROR_NONE;
-
-    KM.Tx.Current_x10 = (uint16_t) (MS.Battery_Current/100); //MS.Battery_Current is in mA
-
-
-    /* Receive Rx parameters/settings and send Tx parameters */
-    KingMeter_Service(&KM);
-
-
-    /* Apply Rx parameters */
-
-    MS.assist_level = KM.Rx.AssistLevel;
-
-    if(KM.Rx.Headlight == KM_HEADLIGHT_OFF)
-        {
-        	HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_RESET);
-        	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
-        }
-        else // KM_HEADLIGHT_ON, KM_HEADLIGHT_LOW, KM_HEADLIGHT_HIGH
-        {
-        	HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_SET);
-        	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-        }
-
-
-    if(KM.Rx.PushAssist == KM_PUSHASSIST_ON)
-    {
-    	ui8_Push_Assist_flag=1;
-    }
-    else
-    {
-    	ui8_Push_Assist_flag=0;
-    }
-
-
-
+    Display_Init(&MS);
 }
 
-#endif
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_BAFANG)
-void bafang_update(void)
-{
-    /* Prepare Tx parameters */
-
-	if(adcData[0]*CAL_BAT_V>BATTERY_LEVEL_5)battery_percent_fromcapacity=75;
-	else if(adcData[0]*CAL_BAT_V>BATTERY_LEVEL_4)battery_percent_fromcapacity=50;
-	else if(adcData[0]*CAL_BAT_V>BATTERY_LEVEL_3)battery_percent_fromcapacity=30;
-	else if(adcData[0]*CAL_BAT_V>BATTERY_LEVEL_2)battery_percent_fromcapacity=10;
-	else if(adcData[0]*CAL_BAT_V>BATTERY_LEVEL_1)battery_percent_fromcapacity=5;
-	else battery_percent_fromcapacity=0;
-
-
-    	BF.Tx.Battery = battery_percent_fromcapacity;
-
-
-    if(__HAL_TIM_GET_COUNTER(&htim2) < 12000)
-    {
-        // Adapt wheeltime to match displayed speedo value according config.h setting
-        BF.Tx.Wheeltime_ms = WHEEL_CIRCUMFERENCE*216/(MS.Speed*PULSES_PER_REVOLUTION); // Geschwindigkeit ist Weg pro Zeit Radumfang durch Dauer einer Radumdrehung --> Umfang * 8000*3600/(n*1000000) * Skalierung Bafang Display 200/26,6
-
-    }
-    else
-    {
-        BF.Tx.Wheeltime_ms = 0; //64000;
-    }
-
-
-       BF.Tx.Power = MS.i_q*MS.Voltage;
-
-
-    /* Receive Rx parameters/settings and send Tx parameters */
-    Bafang_Service(&BF,1);
-
-
-
-    /* Apply Rx parameters */
-
-//No headlight supported on my controller hardware.
-    if(BF.Rx.Headlight)
-    {
-       // digitalWrite(lights_pin, 0);
-    }
-    else
-    {
-       // digitalWrite(lights_pin, 1);
-    }
-
-
-    if(BF.Rx.PushAssist) ui8_Push_Assist_flag=1;
-    else ui8_Push_Assist_flag=0;
-
-    MS.assist_level=BF.Rx.AssistLevel;
-}
-
-#endif
 
 int32_t map (int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t out_max)
 {
@@ -2540,12 +2129,9 @@ static q31_t get_target_power()
         
         //uint32_t pas_rpm = 21818 / uint32_PAS;
         //
-#if (DISPLAY_TYPE == DISPLAY_TYPE_AUREUS)
-        uint32_t pas_omega_x10 = (2285 * (DA.Rx.AssistLevel >> 3)) / uint32_PAS;                // including the assistfactor x10
-#else
-        uint32_t pas_omega_x10 = (2285 * (28)) / uint32_PAS;                // including the assistfactor x10
+        uint32_t pas_omega_x10 = (2285 * (MS.ui8_assist_level >> 3)) / uint32_PAS;                // including the assistfactor x10
+        //uint32_t pas_omega_x10 = (2285 * (28)) / uint32_PAS;                // including the assistfactor x10
         //uint32_t pas_omega_x10 = (2285 * (DD.ui16_value)) / uint32_PAS;                // including the assistfactor x10
-#endif
         //uint32_t pas_omega_x10 = (2285 * (1.0)) / PAS_mod;                // including the assistfactor x10
     	//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
     	uint16_t torque_nm = (uint32_torque_cumulated >> 4) >> 4;
@@ -2724,8 +2310,8 @@ static void i_q_control()
     MS.u_q = u_q_temp;
     MS.u_d = 0;
     
-    //if(ui8_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
-    //if(ui8_UART_TxCplt_flag && (print_count >= 200))
+    //if(ui8_g_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
+    //if(ui8_g_UART_TxCplt_flag && (print_count >= 200))
     //{
         //sprintf_(buffer, "%u %d %d %d\n", i_q_control_state, u_q_temp, battery_power, target_power);
         //debug_print(buffer, strlen(buffer));
@@ -2805,7 +2391,7 @@ static void i_d_control()
         alpha_temp = min_alpha;
     }
     
-    if(ui8_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
+    if(ui8_g_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
     {
         //q31_t deg = (alpha_temp * 10) / Q31_DEGREE * 10;
         //sprintf_(buffer, "%d %d %d\n", i_q, i_d, deg);
@@ -2859,7 +2445,7 @@ void runPIcontrol()
 
 /*void runPIcontrol2(){
 
-    //if(ui8_UART_TxCplt_flag)
+    //if(ui8_g_UART_TxCplt_flag)
     //{
     //    sprintf_(buffer, "*%d\n", MS.i_q);
     //    debug_print(buffer, strlen(buffer));
