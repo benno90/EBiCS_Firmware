@@ -37,8 +37,6 @@ BUILD_DIR = build
 # C sources
 C_SOURCES =  \
 Src/main.c \
-Src/stm32f1xx_it.c \
-Src/stm32f1xx_hal_msp.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_gpio_ex.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_adc.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_adc_ex.c \
@@ -55,17 +53,15 @@ Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_tim.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_tim_ex.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_uart.c \
 Src/system_stm32f1xx.c \
+Src/stm32f1xx_hal_msp.c \
+Src/stm32f1xx_it.c \
 Src/FOC.c \
 Src/display_kingmeter.c \
 Src/display_aureus.c \
 Src/display_debug.c \
 Src/display_bafang.c \
 Src/eeprom.c \
-Src/main.c \
-Src/print.c \
-Src/stm32f1xx_hal_msp.c \
-Src/stm32f1xx_it.c \
-Src/system_stm32f1xx.c 
+Src/print.c
 
 #Src/display_ebics.c \
 #Src/display_kunteng.c \
@@ -138,7 +134,7 @@ C_INCLUDES =  \
 # compile gcc flags
 ASFLAGS = $(MCU) $(AS_DEFS) $(AS_INCLUDES) $(OPT) -Wall -fdata-sections -ffunction-sections
 
-CFLAGS = $(MCU) $(C_DEFS) $(C_INCLUDES) $(OPT) -Wall -fdata-sections -ffunction-sections
+CFLAGS = $(MCU) $(C_DEFS) $(C_INCLUDES) $(OPT) -Wall -Wextra -Wno-unused-parameter -fdata-sections -ffunction-sections
 
 ifeq ($(DEBUG), 1)
 CFLAGS += -g -gdwarf-2
@@ -158,7 +154,7 @@ LDSCRIPT = STM32F103C6Tx_FLASH.ld
 # libraries
 LIBS = -lc -lm -lnosys -larm_cortexM3l_math 
 LIBDIR = 
-LDFLAGS = $(MCU) -specs=nano.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(BUILD_DIR)/$(TARGET).map,--cref -Wl,--gc-sections -z muldefs -L Drivers/CMSIS
+LDFLAGS = $(MCU) -specs=nano.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(BUILD_DIR)/$(TARGET).map,--cref -Wl,--gc-sections -L Drivers/CMSIS
 
 # default action: build all
 all: $(BUILD_DIR)/$(TARGET).elf $(BUILD_DIR)/$(TARGET).hex $(BUILD_DIR)/$(TARGET).bin

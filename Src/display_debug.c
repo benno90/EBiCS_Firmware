@@ -1,6 +1,8 @@
 #include "display_debug.h"
 #include "main.h"
 #include "stm32f1xx_hal.h"
+#include "print.h"
+#include <stdlib.h> // atoi
 
 #define RX_BYTE(b) (buffer_index1 + b) % DEBUG_SIZE_RX_DMA_BUFFER
 
