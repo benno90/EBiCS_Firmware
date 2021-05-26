@@ -112,7 +112,6 @@ int8_t i8_reverse_flag = 1; //for temporaribly reverse direction
 
 volatile uint8_t ui8_adc_offset_done_flag=0;
 volatile uint8_t ui8_Push_Assist_flag=0;
-volatile uint8_t ui8_g_UART_TxCplt_flag=1;
 volatile uint8_t ui8_PAS_flag=0;
 volatile uint8_t ui8_SPEED_flag=0;
 volatile uint8_t ui8_SPEED_control_flag=0;
@@ -781,23 +780,14 @@ int main(void)
                 break;
             }
 
-            if (ui8_fast_loop_log_state == 0)
+            if (slow_loop_print_counter == 0)
             {
-                if (slow_loop_print_counter == 0)
-                {
-                    //sprintf_(buffer, "%d\n", MS.u_q);
-                    //if(ui8_UART_g_TxCplt_flag && DD.log)
-                    if (ui8_UART_g_TxCplt_flag && MS.ui16_dbg_value2 > 0)
-                    {
-                        HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, strlen(buffer));
-                        ui8_UART_g_TxCplt_flag = 0;
-                    }
-                    slow_loop_print_counter = 4;
-                }
-                else
-                {
-                    --slow_loop_print_counter;
-                }
+                debug_print((uint8_t* ) buffer, strlen(buffer));
+                slow_loop_print_counter = 4;
+            }
+            else
+            {
+                --slow_loop_print_counter;
             }
 
 #endif
@@ -1196,7 +1186,7 @@ static void MX_USART1_UART_Init(void)
 {
 
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = ui32_g_DisplayBaudRate;
+  huart1.Init.BaudRate = DISPLAY_UART_BAUDRATE;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -1576,7 +1566,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     	}
 
         // TODO - move switch statement here
-        // and only process the event if the direction is forward
+        // and only process the event if the direction if the transition is valid and in forward direction
+        // if it is not a valid transition do not feed the phase locked loop and backup to extrapolation ?
 
         if(ui8_hall_timeout_flag)
         {

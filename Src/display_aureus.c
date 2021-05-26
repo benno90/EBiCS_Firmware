@@ -11,7 +11,6 @@
 #define AUREUS_SIZE_RX_RUNNING 10
 #define AUREUS_SIZE_TX 13
 
-uint32_t ui32_g_DisplayBaudRate = 9600;
 
 static const uint8_t shake_hands_byte[64] = {0x89, 0x9F, 0x86, 0xF9, 0x58, 0x0B, 0xFA, 0x3D, 0x21, 0x96, 0x03, 0xC1,
                                              0x76, 0x8D, 0xD1, 0x5E, 0xE2, 0x44, 0x92, 0x9E, 0x91, 0x7F, 0xD8, 0x3E, 0x74, 0xE6, 0x65, 0xD3, 0xFB, 0x36, 0xE5, 0xF7,
@@ -31,7 +30,7 @@ static uint8_t DisplayAureus_CheckSettingsMessage(uint8_t bytes_received)
     uint16_t checksum = 0x0;
     uint16_t checksum_rx;
 
-    if (bytes_received != AUREUS_SIZE_RX_RUNNING)
+    if (bytes_received != AUREUS_SIZE_RX_SETTINGS)
         return 0;
 
     // header and trailer

@@ -5,6 +5,7 @@
 extern UART_HandleTypeDef huart1;
 
 volatile uint8_t ui8_g_UART_Rx_flag = 0;
+volatile uint8_t ui8_g_UART_TxCplt_flag = 1;
 
 static uint32_t prevCNDTR = DISPLAY_SIZE_RX_BUFFER;
 uint8_t ui8_buffer_index1 = 0; // circular buffer read position

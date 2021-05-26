@@ -8,7 +8,6 @@
 
 #if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
 
-uint32_t ui32_g_DisplayBaudRate = 57600;
 
 
 extern UART_HandleTypeDef huart1;
@@ -75,6 +74,8 @@ void Display_Service(MotorState_t *pMS)
     if (strncmp((char *) TxBuff, "TOGGLE ", 7) == 0)
     {
         // serialize bluetooth app -> select the signal to plot
+        do_log = 1;
+        pMS->ui8_log = 1;
         switch ((char) TxBuff[7])
         {
             case '1':
