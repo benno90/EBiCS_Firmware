@@ -18,7 +18,7 @@ extern uint8_t ui8_bytes_received;
 extern uint8_t RxBuff[DISPLAY_SIZE_RX_BUFFER];
 extern uint8_t TxBuff[DISPLAY_SIZE_TX_BUFFER];
 
-static uint8_t do_log = 0;
+static uint8_t do_log = 1;
 
 void debug_print(uint8_t* data, uint16_t size)
 {

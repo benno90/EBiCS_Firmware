@@ -132,6 +132,7 @@ void Display_Service(MotorState_t *pMS)
         TxBuff[6] = (ui16_temp & 0xFF00) >> 8;
         TxBuff[7] = (ui16_temp & 0x00FF);
         // error state
+        // todo -> make motor state enum global...
         switch(pMS->error_state)
         {
             case 0:         //MOTOR_STATE_NORMAL:
@@ -143,6 +144,9 @@ void Display_Service(MotorState_t *pMS)
                 break;
             case 2:         // MOTOR_STATE_PLL_ERROR:
                 TxBuff[8] = 0x22;
+                break;
+            case 3:         // MOTOR_STATE_HALL_ERROR:
+                TxBuff[8] = 0x23;
                 break;
             default:
                 TxBuff[8] = 0;
