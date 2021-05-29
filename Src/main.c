@@ -1218,8 +1218,9 @@ static void MX_DMA_Init(void)
   HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
   /* DMA1_Channel5_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
+  // benno 27.05.21 - disabled rx cplt interrupt
+  // HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
+  // HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
 
 }
 
@@ -1718,6 +1719,8 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *UartHandle)
 //	ui8_UART_flag=1;
 //#endif
 //
+
+// benno: disabled dma channel 5 interrupts -> see MX_DMA_Init
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *UartHandle)
