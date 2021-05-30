@@ -24,6 +24,7 @@ void Display_Init(MotorState_t* pMS);
 void Display_Service(MotorState_t* pMS);
 
 void debug_print(uint8_t* data, uint16_t size);
+void debug_print2(uint8_t* data, uint16_t size);
 
 
 /* 

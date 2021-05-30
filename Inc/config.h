@@ -81,8 +81,10 @@
 #define SPEEDSOURCE INTERNAL
 #define SPEEDFILTER 1
 
-#define SIXSTEPTHRESHOLD_UP 7300            // 5 kmh    
-#define SIXSTEPTHRESHOLD_DOWN 12222         // 3 kmh
+#define SIXSTEPTHRESHOLD_UP 5586            // 5 kmh    
+#define SIXSTEPTHRESHOLD_DOWN 9310         // 3 kmh
+#define MOTOR_ENABLE_THRESHOLD 1400         // 20 kmh
+#define MOTOR_AUTO_ENABLE_THRESHOLD 2800         // 10 kmh
 #define HALL_TIMEOUT 64000                 // 0.58 kmh
 
 #endif /* CONFIG_H_ */

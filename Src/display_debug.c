@@ -34,7 +34,7 @@ void debug_print(uint8_t* data, uint16_t size)
     }
 }
 
-static void debug_print2(uint8_t* data, uint16_t size)
+void debug_print2(uint8_t* data, uint16_t size)
 {
     if(size >= DISPLAY_SIZE_TX_BUFFER)
     {

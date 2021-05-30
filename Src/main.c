@@ -82,7 +82,6 @@ uint32_t ui32_tim3_counter=0;
 static uint8_t slow_loop_counter = 0;
 static uint8_t slow_loop_print_counter = 0;
 
-uint8_t ui8_hall_error_print_flag = 0;
 uint8_t ui8_hall_state=0;
 uint8_t ui8_hall_state_old=0;
 uint8_t ui8_hall_case =0;
@@ -197,9 +196,9 @@ int16_t current_display;							//pepared battery current for display
 typedef enum {HALL_STATE_SIXSTEP = 0, HALL_STATE_EXTRAPOLATION = 1, HALL_STATE_PLL = 2} hall_angle_state_t;
 static hall_angle_state_t enum_hall_angle_state = HALL_STATE_SIXSTEP;
 static uint8_t ui8_six_step_hall_count = 3;
-static uint8_t ui8_extrapolation_hall_count = 10;
+static uint8_t ui8_extrapolation_hall_count = 20;
 
-typedef enum {MOTOR_STATE_NORMAL = 0, MOTOR_STATE_BLOCKED = 1, MOTOR_STATE_PLL_ERROR = 2, MOTOR_STATE_HALL_ERROR = 3} motor_error_state_t;
+typedef enum {MOTOR_STATE_NORMAL = 0, MOTOR_STATE_BLOCKED = 1, MOTOR_STATE_PLL_ERROR = 2, MOTOR_STATE_HALL_ERROR = 3, MOTOR_STATE_DBG_ERROR = 10} motor_error_state_t;
 static motor_error_state_t enum_motor_error_state = MOTOR_STATE_NORMAL;
 static uint8_t ui8_motor_error_state_hall_count = 0;
 static uint16_t ui16_motor_init_state_timeout = 0;
@@ -248,9 +247,32 @@ static void enable_pwm()
 	uint16_half_rotation_counter=0;
 	uint16_full_rotation_counter=0;
     //
-	TIM1->CCR1 = 1023;
-	TIM1->CCR2 = 1023;
-	TIM1->CCR3 = 1023;
+    uint32_t ui32_KV = 260000;
+    uint32_t u_q = ui32_KV * _T / (BatteryVoltageData.q31_battery_voltage_V_x10 * uint32_tics_filtered >> 3);
+    //u_q = u_q + 50;
+    //u_q = 0;
+
+    if(u_q > 1500)
+    {
+        u_q = 1500;
+    }
+
+    if(u_q < 200)
+    {
+        u_q = 0;
+    }
+
+    MS.u_q = u_q;
+    MS.u_d = 0;
+    sprintf_(buffer, "enable pwm, u_q = %lu\n", u_q);
+    debug_print((uint8_t* ) buffer, strlen(buffer));
+
+    q31_rotorposition_absolute = q31_rotorposition_hall + (DEG_plus60 >> 1);
+    compute_switchtime(0, u_q, q31_rotorposition_absolute);
+    //
+	TIM1->CCR1 = switchtime[0]; //1023;
+	TIM1->CCR2 = switchtime[1]; //1023;
+	TIM1->CCR3 = switchtime[2]; //1023;
     //
     enum_hall_angle_state = HALL_STATE_SIXSTEP;
     ui8_six_step_hall_count = 3;
@@ -266,6 +288,34 @@ static void disable_pwm()
     enum_hall_angle_state = HALL_STATE_SIXSTEP;
     ui8_six_step_hall_count = 3;
     ui8_pwm_enabled_flag = 0;
+}
+
+static void trigger_motor_error(motor_error_state_t err)
+{
+    disable_pwm();
+    enum_motor_error_state = err;
+    ui8_motor_error_state_hall_count = 100;
+#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
+    switch(err)
+    {
+        case MOTOR_STATE_BLOCKED:
+            sprintf_(buffer, "\nERR: MOTOR_STATE_BLOCKED\n\n");
+            break;
+        case MOTOR_STATE_PLL_ERROR:
+            sprintf_(buffer, "\nERR: MOTOR_STATE_PLL_ERROR\n\n");
+            break;
+        case MOTOR_STATE_HALL_ERROR:
+            sprintf_(buffer, "\nERR: MOTOR_STATE_HALL_ERROR\n\n");
+            break;
+        case MOTOR_STATE_DBG_ERROR:
+            sprintf_(buffer, "\nERR: MOTOR_STATE_DBG_ERROR\n\n");
+            break;
+        default:
+            sprintf_(buffer, "\nERR: UNKNOWN\n");
+            break;        
+    }
+    debug_print2((uint8_t *) buffer, strlen(buffer));
+#endif
 }
 
 
@@ -531,6 +581,12 @@ int main(void)
     while (1)
     {
 
+        if(MS.ui16_dbg_value)
+        {
+            trigger_motor_error(MOTOR_STATE_DBG_ERROR);
+            MS.ui16_dbg_value = 0;
+        }
+
         if(PI_flag || !ui8_pwm_enabled_flag)
         {
             // only pi control can enable the pwm
@@ -757,7 +813,7 @@ int main(void)
             // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
             // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
 
-            switch (MS.ui16_dbg_value2)
+            /*switch (MS.ui16_dbg_value2)
             {
             case 1:
             {
@@ -784,24 +840,22 @@ int main(void)
             default:
                 sprintf_(buffer, "");
                 break;
-            }
+            }*/
                 
-            if(ui8_hall_error_print_flag == 1 && ui8_g_UART_TxCplt_flag)
+            if (slow_loop_print_counter == 0)
             {
-                sprintf_(buffer, "HALL_ERROR\n");
+                //sprintf_(buffer, "%u %u T: %u  U: %u\n", enum_motor_error_state, ui8_six_step_hall_count, (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+                //uint32_t ui32_KV = ((ui16_timertics * BatteryVoltageData.q31_battery_voltage_V_x10) >> 11) * MS.u_q;
+                //sprintf_(buffer, "kv: %lu\n", ui32_KV);
+                //
+                //uint32_t ui32_KV = 260000;
+                //uint32_t u_q = ui32_KV * _T / (BatteryVoltageData.q31_battery_voltage_V_x10 * ui16_timertics);
+                //sprintf_(buffer, "%lu %lu | %u %lu\n", u_q, MS.u_q, ui16_timertics, uint32_tics_filtered >> 3);
+                //
+                sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, enum_hall_angle_state, enum_motor_error_state, ui8_motor_error_state_hall_count);
+                //
                 debug_print((uint8_t* ) buffer, strlen(buffer));
-            }
-            else if(ui8_hall_error_print_flag == 2 && ui8_g_UART_TxCplt_flag)
-            {
-                sprintf_(buffer, "RECOVERED\n");
-                debug_print((uint8_t* ) buffer, strlen(buffer));
-                ui8_hall_error_print_flag = 0;
-            }
-            else if (slow_loop_print_counter == 0)
-            {
-                sprintf_(buffer, "%u %u T: %u  U: %u\n", enum_motor_error_state, ui8_six_step_hall_count, (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
-                debug_print((uint8_t* ) buffer, strlen(buffer));
-                slow_loop_print_counter = 32;
+                slow_loop_print_counter = 16;
             }
             else
             {
@@ -1452,9 +1506,7 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
         //if(ui16_tim2_recent > ui16_timertics + (ui16_timertics >> 2))  // ui16_timertics * 5/4 was too sensitive
         if(ui16_tim2_recent > (ui16_timertics * 2) )       
         {
-            disable_pwm();
-            enum_motor_error_state = MOTOR_STATE_BLOCKED;
-            ui8_motor_error_state_hall_count = 10;
+            trigger_motor_error(MOTOR_STATE_BLOCKED);
         }
 
         switch(enum_hall_angle_state)
@@ -1467,7 +1519,7 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
                 q31_speed_pll_i = DEG_plus60 / ui16_timertics;
                 q31_pll_angle_per_tic = q31_speed_pll_i;
 
-                ui8_extrapolation_hall_count = 10;
+                ui8_extrapolation_hall_count = 20;
 	        
                 if(ui16_timertics < SIXSTEPTHRESHOLD_UP && ui8_six_step_hall_count == 0)
                 {
@@ -1608,12 +1660,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                     if(ui8_extrapolation_hall_count > 0) --ui8_extrapolation_hall_count;
                     if(ui8_six_step_hall_count > 0) -- ui8_six_step_hall_count;
 
-                    if(ui16_timertics > SIXSTEPTHRESHOLD_UP)
-                    {
-                        // clear motor error after a certain amount of hall events at low velocity
-                        if(ui8_motor_error_state_hall_count > 0) -- ui8_motor_error_state_hall_count;
-                        if(ui8_motor_error_state_hall_count == 0) enum_motor_error_state = MOTOR_STATE_NORMAL;
-                    }
+                    // clear motor error after a certain amount of valid hall transitions
+                    if(ui8_motor_error_state_hall_count > 0) -- ui8_motor_error_state_hall_count;
+                    if(ui8_motor_error_state_hall_count == 0) enum_motor_error_state = MOTOR_STATE_NORMAL;
             	}
 
             	switch (ui8_hall_case) //12 cases for each transition from one stage to the next. 6x forward, 6x reverse
@@ -1705,10 +1754,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                     // motor reverse error?
                 //}
                 ui8_hall_error_count = 0;
-                if(ui8_hall_error_print_flag == 1)
-                {
-                    ui8_hall_error_print_flag = 2;
-                }
             } // end if  expected_forward_hall_state
             else
             {
@@ -1728,14 +1773,19 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 // if(MS.hall_angle_detect_flag) ??
                 // also: not updating ui16_timertics..
 
-                ++ui8_hall_error_count;
-                ui8_hall_error_print_flag = 1;
                 if(ui8_hall_error_count >= 3)
                 {
-                    disable_pwm();
-                    enum_motor_error_state = MOTOR_STATE_HALL_ERROR;
-                    ui8_motor_error_state_hall_count = 10;
+                    if(!enum_motor_error_state)
+                    {
+                        // if the error state is not checked this error triggers all the time while pushing the bike backwards
+                        trigger_motor_error(MOTOR_STATE_HALL_ERROR);
+                    }
                 }
+                else
+                {
+                    ++ui8_hall_error_count;
+                }
+
                 if(ui8_hall_error_count == 1)
                 {
                     ui8_hall_state_old = next_expected_forward_hall_state[ui8_hall_state];
@@ -2302,12 +2352,11 @@ static void i_q_control()
         //
 
         // enable pwm if power is requested or velocity goes above a certain limit
-        //if(target_power > 0)
-        if(target_power > 0  || (ui16_timertics < SIXSTEPTHRESHOLD_UP))
+        if(target_power > 0  || (ui16_timertics < MOTOR_AUTO_ENABLE_THRESHOLD) )
         {
             if(!enum_motor_error_state)
             {
-                if(ui16_timertics > (SIXSTEPTHRESHOLD_UP * 2 / 3))      // do not enable pwm above approx 8 kmh -> leads to uncontrolled regeneration
+                if(ui16_timertics > (MOTOR_ENABLE_THRESHOLD))      // do not enable pwm above a ceratin limit velocity
                 {
                     enable_pwm();
                     // i plan to disable the pwm as soon as ui16_timertics > SIXSTEPTHRESHOLD_DOWN
@@ -2600,9 +2649,7 @@ q31_t speed_PLL (q31_t ist, q31_t soll)
         if(q31_pll_abs_delta > (Q31_DEGREE * 25))
         {
             // ERROR
-            //disable_pwm();
-            //enum_motor_error_state = MOTOR_STATE_PLL_ERROR;
-            //ui8_motor_error_state_hall_count = 20;
+            //trigger_motor_error(MOTOR_STATE_PLL_ERROR)
 
             // PLL seems to be in trouble
             // fallback to extraploation

@@ -72,8 +72,6 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
 
 	 q31_t q31_i_alpha = 0;
 	 q31_t q31_i_beta = 0;
-	 q31_t q31_u_alpha = 0;
-	 q31_t q31_u_beta = 0;
 	 q31_t q31_i_d = 0;
 	 q31_t q31_i_q = 0;
 
@@ -135,12 +133,8 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
 	
     q31_t q31_theta2 = q31_teta + MS_FOC->foc_alpha;
     //q31_theta2 = -q31_theta2;
-    arm_sin_cos_q31(q31_theta2, &sinevalue, &cosinevalue);
 
-	//inverse Park transformation
-	arm_inv_park_q31(MS_FOC->u_d, MS_FOC->u_q, &q31_u_alpha, &q31_u_beta, -sinevalue, cosinevalue);
-	//arm_inv_park_q31(MS_FOC->u_d, MS_FOC->u_q, &q31_u_alpha, &q31_u_beta, sinevalue, cosinevalue);
-
+    compute_switchtime(MS_FOC->u_d, MS_FOC->u_q, q31_theta2);
 
 
 #ifdef FAST_LOOP_LOG
@@ -174,18 +168,33 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
 
 #endif
 
-	//call SVPWM calculation
-	svpwm(q31_u_alpha, q31_u_beta);
-    
-    // benno 10.05.21 - svpwm2 only works with negative theta & negative u_beta -> todo: check why this is the case
-    // svpwm2(q31_u_alpha, -q31_u_beta, q31_theta2);
-    // svpwm2(q31_u_alpha, q31_u_beta, q31_theta2);
     
 	//temp6=__HAL_TIM_GET_COUNTER(&htim1);
 
     ++ui8_foc_counter;
 
 }
+
+
+void compute_switchtime(q31_t q31_u_d, q31_t q31_u_q, q31_t q31_theta)
+{
+    static q31_t q31_sinevalue, q31_cosinevalue;
+	static q31_t q31_u_alpha, q31_u_beta;
+    
+    arm_sin_cos_q31(q31_theta, &q31_sinevalue, &q31_cosinevalue);
+
+	//inverse Park transformation
+	arm_inv_park_q31(q31_u_d, q31_u_q, &q31_u_alpha, &q31_u_beta, -q31_sinevalue, q31_cosinevalue);
+	//arm_inv_park_q31(MS_FOC->u_d, MS_FOC->u_q, &q31_u_alpha, &q31_u_beta, sinevalue, cosinevalue);
+	
+    //call SVPWM calculation
+	svpwm(q31_u_alpha, q31_u_beta);
+    
+    // benno 10.05.21 - svpwm2 only works with negative theta & negative u_beta -> todo: check why this is the case
+    // svpwm2(q31_u_alpha, -q31_u_beta, q31_theta2);
+    // svpwm2(q31_u_alpha, q31_u_beta, q31_theta2);
+}
+
 
 
 q31_t PI_control (PI_control_t* PI_c)
