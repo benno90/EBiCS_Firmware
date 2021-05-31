@@ -155,6 +155,7 @@ typedef struct
 	int8_t         	gear_state;
 	int8_t         	error_state;
     //
+    uint8_t         ui8_dbg_log_value;
     uint16_t        ui16_dbg_value;
     uint16_t        ui16_dbg_value2;
     uint8_t         ui8_go;

@@ -79,22 +79,22 @@ void Display_Service(MotorState_t *pMS)
         switch ((char) TxBuff[7])
         {
             case '1':
-                pMS->ui16_dbg_value2 = 1;
+                pMS->ui8_dbg_log_value = 1;
                 break;
             case '2': 
-                pMS->ui16_dbg_value2 = 2;
+                pMS->ui8_dbg_log_value = 2;
                 break;
             case '3':
-                pMS->ui16_dbg_value2 = 3;
+                pMS->ui8_dbg_log_value = 3;
                 break;
             case '4': 
-                pMS->ui16_dbg_value2 = 4;
+                pMS->ui8_dbg_log_value = 4;
                 break;
             case '5':
-                pMS->ui16_dbg_value2 = 5;
+                pMS->ui8_dbg_log_value = 5;
                 break;
             case '6': 
-                pMS->ui16_dbg_value2 = 6;
+                pMS->ui8_dbg_log_value = 6;
                 break;
             default:
                 break;
@@ -118,9 +118,9 @@ void Display_Service(MotorState_t *pMS)
     {
         // parse value
         pMS->ui16_dbg_value = atoi((char *) &(TxBuff[2]));
-        if(pMS->ui16_dbg_value > 40)
+        if(pMS->ui16_dbg_value > 30)
         {
-            pMS->ui16_dbg_value = 40;
+            pMS->ui16_dbg_value = 30;
         }
         sprintf_((char *) TxBuff, "ui16_value = %u\n", pMS->ui16_dbg_value);
         debug_print2(TxBuff, strlen((char *) TxBuff));
@@ -134,6 +134,17 @@ void Display_Service(MotorState_t *pMS)
             pMS->ui16_dbg_value2 = 20;
         }
         sprintf_((char *) TxBuff, "ui16_value2 = %u\n", pMS->ui16_dbg_value2);
+        debug_print2(TxBuff, strlen((char *) TxBuff));
+    }
+    else if(strncmp((char *) TxBuff, "l ", 2) == 0)
+    {
+        // parse value
+        pMS->ui8_dbg_log_value = atoi((char *) &(TxBuff[2]));
+        if(pMS->ui8_dbg_log_value > 10)
+        {
+            pMS->ui8_dbg_log_value = 0;
+        }
+        sprintf_((char *) TxBuff, "dbg log = %u\n", pMS->ui8_dbg_log_value);
         debug_print2(TxBuff, strlen((char *) TxBuff));
     }
     else if(strncmp((char *) TxBuff, "log", 3) == 0)

@@ -164,8 +164,8 @@ volatile uint16_t adcData[8]; //Buffer for ADC1 Input
 q31_t tic_array[6];
 
 
-const uint32_t ui32_wheel_speed_tics_lower_limit  = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * SPEEDLIMIT * 10); //tics=wheelcirc*timerfrequency/(no. of hallevents per rev*gear-ratio*speedlimit)*3600/1000000
-const uint32_t ui32_wheel_speed_tics_higher_limit = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * (SPEEDLIMIT + 3) * 10);
+//const uint32_t ui32_wheel_speed_tics_lower_limit  = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * SPEEDLIMIT * 10); //tics=wheelcirc*timerfrequency/(no. of hallevents per rev*gear-ratio*speedlimit)*3600/1000000
+//const uint32_t ui32_wheel_speed_tics_higher_limit = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * (SPEEDLIMIT + 3) * 10);
 
 uint32_t uint32_tics_filtered = HALL_TIMEOUT << 3;
 
@@ -179,8 +179,8 @@ BatteryVoltageData_t BatteryVoltageData;
 TemperatureData_t TemperatureData;
 
 //structs for PI_control
-PI_control_t PI_iq;
-PI_control_t PI_id;
+PI_control_t PI_iq;   // todo: rename to PI_amplitude
+PI_control_t PI_id;   // todo: rename to PI_angle
 PI_control_t PI_speed;
 //
 // PI_control static variables
@@ -263,9 +263,14 @@ static void enable_pwm()
     }
 
     MS.u_q = u_q;
+    PI_iq.integral_part = (u_q << PI_iq.shift) / PI_iq.gain_i;
     MS.u_d = 0;
+    PI_id.integral_part = 0;
+    //
+#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
     sprintf_(buffer, "enable pwm, u_q = %lu\n", u_q);
     debug_print((uint8_t* ) buffer, strlen(buffer));
+#endif
 
     q31_rotorposition_absolute = q31_rotorposition_hall + (DEG_plus60 >> 1);
     compute_switchtime(0, u_q, q31_rotorposition_absolute);
@@ -368,6 +373,7 @@ int main(void)
   MP.wheel_cirumference = WHEEL_CIRCUMFERENCE;
   MP.speedLimit=SPEEDLIMIT;
 
+  MS.ui8_dbg_log_value = 0;
   MS.ui16_dbg_value2 = 0;
   MS.ui16_dbg_value = 0;
   MS.ui8_go = 0;
@@ -388,7 +394,7 @@ int main(void)
   PI_id.limit_output_max_shifted = Q31_DEGREE * 20 << SHIFT_ID;
   PI_id.limit_output_min_shifted = -Q31_DEGREE * 20 << SHIFT_ID;
   PI_id.max_step_shifted=Q31_DEGREE << SHIFT_ID;   // shifted value
-  PI_id.shift=0;
+  PI_id.shift=SHIFT_ID;
 
   #define SHIFT_IQ 10
   PI_iq.gain_i=I_FACTOR_I_Q;
@@ -397,7 +403,7 @@ int main(void)
   PI_iq.limit_output_max_shifted = _U_MAX << SHIFT_IQ;
   PI_iq.limit_output_min_shifted = 0 << SHIFT_IQ;        // currently no regeneration
   PI_iq.max_step_shifted= 4 << SHIFT_IQ;      // shifted value
-  PI_iq.shift=10;
+  PI_iq.shift=SHIFT_IQ;
 
 #ifdef SPEEDTHROTTLE
 
@@ -581,10 +587,10 @@ int main(void)
     while (1)
     {
 
-        if(MS.ui16_dbg_value)
+        if(MS.ui16_dbg_value2)
         {
             trigger_motor_error(MOTOR_STATE_DBG_ERROR);
-            MS.ui16_dbg_value = 0;
+            MS.ui16_dbg_value2 = 0;
         }
 
         if(PI_flag || !ui8_pwm_enabled_flag)
@@ -597,9 +603,7 @@ int main(void)
 	    if(ui8_g_UART_Rx_flag)
         {
 		    // period [s] = tics x 6 x GEAR_RATIO / frequency    (frequency = 500kHz)
-		    //DA.Tx.Wheeltime_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / 500;
-            // 05.05.21 -> 20% error ?! -> x 6/5      using 23 /20 = 1.15 
-            MS.ui16_wheel_time_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO * 6 / (500 * 5);
+            MS.ui16_wheel_time_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / (500);
 
             MS.q31_battery_current_mA = CurrentData.q31_battery_current_mA;
             MS.error_state = enum_motor_error_state; // todo -> move enum_motor_error_state into MS
@@ -798,64 +802,88 @@ int main(void)
 
             //print values for debugging
 
-            //uint32_t pas_omega = 2285 / uint32_PAS;
-            //uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
-            //uint16_t pedal_power = pas_omega * torque_nm;
-            //sprintf_(buffer, "%d %d\n", BatteryVoltageData.q31_battery_voltage_V_x10, TemperatureData.q31_temperature_degrees);
-            //sprintf_(buffer, "%d\n", TemperatureData.q31_temperature_degrees);
-
-            //q31_t batt_current_x10 = CurrentData.q31_battery_current_mA / 100;
-            //q31_t phase_current_x10 = ((4 * batt_current_x10) << 11) / (3 * MS.u_q);
-            //sprintf_(buffer, "%d | %d %d\n", MS.u_q, batt_current_x10, phase_current_x10);
-
-            //sprintf_(buffer, "%d, %d, %d, %d, %d, %d, %d, %d, %d\r\n", ui16_timertics, MS.i_q, int32_current_target,((temp6 >> 23) * 180) >> 8, (uint16_t)adcData[1], MS.Battery_Current,internal_tics_to_speedx100(uint32_tics_filtered>>3),external_tics_to_speedx100(MS.Speed),uint32_SPEEDx100_cumulated>>SPEEDFILTER);
-            //sprintf_(buffer, "%d, %d, %d, %d\n", int32_temp_current_target, uint32_torque_cumulated, uint32_PAS, MS.assist_level);
-            // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",ui8_hall_state,(uint16_t)adcData[1],(uint16_t)adcData[2],(uint16_t)adcData[3],(uint16_t)(adcData[4]),(uint16_t)(adcData[5])) ;
-            // sprintf_(buffer, "%d, %d, %d, %d, %d, %d\r\n",tic_array[0],tic_array[1],tic_array[2],tic_array[3],tic_array[4],tic_array[5]) ;
-
-            /*switch (MS.ui16_dbg_value2)
-            {
-            case 1:
-            {
-                uint16_t velocity_kmh = 2234 * 50 * 36 / (6 * GEAR_RATIO * (uint32_tics_filtered >> 3));
-                sprintf_(buffer, "Graph:%u$", velocity_kmh);
-                break;
-            }
-            case 2:
-                sprintf_(buffer, "Graph:%u|%u$", (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
-                break;
-            case 3:
-                sprintf_(buffer, "Graph:%u$", (uint16_t)MS.u_q);
-                break;
-            case 4:
-                sprintf_(buffer, "Graph:%u$", (uint16_t)q31_degree_to_degree(MS.foc_alpha));
-                break;
-            case 5:
-            {
-                uint32_t phase_current_x10 = CurrentData.q31_battery_current_mA / 100;
-                phase_current_x10 = phase_current_x10 * 4 * _T / (3 * MS.u_q);
-                sprintf_(buffer, "Graph:%u|%u$", (uint16_t)CurrentData.q31_battery_current_mA / 100, phase_current_x10);
-                break;
-            }
-            default:
-                sprintf_(buffer, "");
-                break;
-            }*/
-                
             if (slow_loop_print_counter == 0)
             {
-                //sprintf_(buffer, "%u %u T: %u  U: %u\n", enum_motor_error_state, ui8_six_step_hall_count, (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
-                //uint32_t ui32_KV = ((ui16_timertics * BatteryVoltageData.q31_battery_voltage_V_x10) >> 11) * MS.u_q;
-                //sprintf_(buffer, "kv: %lu\n", ui32_KV);
-                //
-                //uint32_t ui32_KV = 260000;
-                //uint32_t u_q = ui32_KV * _T / (BatteryVoltageData.q31_battery_voltage_V_x10 * ui16_timertics);
-                //sprintf_(buffer, "%lu %lu | %u %lu\n", u_q, MS.u_q, ui16_timertics, uint32_tics_filtered >> 3);
-                //
-                sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, enum_hall_angle_state, enum_motor_error_state, ui8_motor_error_state_hall_count);
-                //
-                debug_print((uint8_t* ) buffer, strlen(buffer));
-                slow_loop_print_counter = 16;
+
+                switch (MS.ui8_dbg_log_value)
+                {
+                case 0:
+                    #ifndef BLUETOOTH_SERIALIZE_DISPLAY
+                    // plot anything here
+                    //sprintf_(buffer, "%u %u T: %u  U: %u\n", enum_motor_error_state, ui8_six_step_hall_count, (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+                    //uint32_t ui32_KV = ((ui16_timertics * BatteryVoltageData.q31_battery_voltage_V_x10) >> 11) * MS.u_q;
+                    //sprintf_(buffer, "kv: %lu\n", ui32_KV);
+                    //
+                    //uint32_t ui32_KV = 260000;
+                    //uint32_t u_q = ui32_KV * _T / (BatteryVoltageData.q31_battery_voltage_V_x10 * ui16_timertics);
+                    //sprintf_(buffer, "%lu %lu | %u %lu\n", u_q, MS.u_q, ui16_timertics, uint32_tics_filtered >> 3);
+                    //
+                    sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, enum_motor_error_state, enum_hall_angle_state, ui8_motor_error_state_hall_count);
+                    //
+                    #endif
+                    break;
+                case 1:
+                {
+                    uint16_t velocity_kmh = 2234 * 50 * 36 / (6 * GEAR_RATIO * (uint32_tics_filtered >> 3));
+                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
+                    sprintf_(buffer, "Graph:%u$", velocity_kmh);
+                    #else
+                    sprintf_(buffer, "v_kmh: %u\n", velocity_kmh);
+                    #endif
+                    break;
+                }
+                case 2:
+                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
+                    sprintf_(buffer, "Graph:%u|%u$", (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+                    #else
+                    sprintf_(buffer, "T: %u | U: %u\n", (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+                    #endif
+                    break;
+                case 3:
+                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
+                    sprintf_(buffer, "Graph:%u$", (uint16_t)MS.u_q);
+                    #else
+                    sprintf_(buffer, "u_q: %u\n", (uint16_t)MS.u_q);
+                    #endif
+                    break;
+                case 4:
+                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
+                    sprintf_(buffer, "Graph:%u$", (uint16_t)q31_degree_to_degree(MS.foc_alpha));
+                    #else
+                    sprintf_(buffer, "foc_alpha: %u\n", (uint16_t)q31_degree_to_degree(MS.foc_alpha));
+                    #endif
+                    break;
+                case 5:
+                {
+                    uint32_t phase_current_x10 = CurrentData.q31_battery_current_mA / 100;
+                    phase_current_x10 = phase_current_x10 * 4 * _T / (3 * MS.u_q);
+                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
+                    sprintf_(buffer, "Graph:%u|%u$", (uint16_t)CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+                    #else
+                    sprintf_(buffer, "cur: %u | ph_cur: %u (A x10)\n", (uint16_t)CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+                    #endif
+                    break;
+                }
+                case 6:
+                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
+                    sprintf_(buffer, "Graph:%u|%u$", MS.i_q, MS.i_d);
+                    #else
+                    sprintf_(buffer, "i_q: %u | i_d: %u\n", MS.i_q, MS.i_d);
+                    #endif
+                    break;
+                default:
+
+                    sprintf_(buffer, ".");
+                    break;
+                }
+                
+                debug_print((uint8_t* ) buffer, strnlen(buffer, 100));
+
+                #ifdef BLUETOOTH_SERIALIZE_DISPLAY
+                slow_loop_print_counter = 0;
+                #else
+                slow_loop_print_counter = 32;
+                #endif
             }
             else
             {
@@ -2230,8 +2258,11 @@ static q31_t get_target_power()
         
         //uint32_t pas_rpm = 21818 / uint32_PAS;
         //
-        //uint32_t pas_omega_x10 = (2285 * (MS.ui8_assist_level >> 3)) / uint32_PAS;                // including the assistfactor x10
-        uint32_t pas_omega_x10 = (2285 * (25)) / uint32_PAS;                // including the assistfactor x10
+#if DISPLAY_TYPE == DISPLAY_TYPE_AUREUS
+        uint32_t pas_omega_x10 = (2285 * (MS.ui8_assist_level >> 3)) / uint32_PAS;                // including the assistfactor x10
+#else
+        uint32_t pas_omega_x10 = (2285 * (MS.ui16_dbg_value)) / uint32_PAS;                // including the assistfactor x10
+#endif
         //uint32_t pas_omega_x10 = (2285 * (28)) / uint32_PAS;                // including the assistfactor x10
         //uint32_t pas_omega_x10 = (2285 * (DD.ui16_value)) / uint32_PAS;                // including the assistfactor x10
         //uint32_t pas_omega_x10 = (2285 * (1.0)) / PAS_mod;                // including the assistfactor x10
@@ -2626,11 +2657,6 @@ void runPIcontrol()
 q31_t speed_PLL (q31_t ist, q31_t soll)
 {
     q31_t delta = soll - ist;
-
-    //clamp i part to twice the theoretical value from hall interrupts
-    //if(q31_d_i>((DEG_plus60>>19)*500/ui16_timertics)<<16)q31_d_i=((DEG_plus60>>19)*500/ui16_timertics)<<16;
-    //if(q31_d_i<-((DEG_plus60>>19)*500/ui16_timertics)<<16)q31_d_i=-((DEG_plus60>>19)*500/ui16_timertics)<<16;
-
 
     q31_t q31_speed_pll_p = delta >> P_FACTOR_PLL;   				//7 for Shengyi middrive, 10 for BionX IGH3
     q31_speed_pll_i += delta >> I_FACTOR_PLL;				//11 for Shengyi middrive, 10 for BionX IGH3

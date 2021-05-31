@@ -16,6 +16,7 @@
 #define DISPLAY_TYPE_BAFANG (1<<2)							// For 'Blaupunkt' Display of Prophete Entdecker
 #define DISPLAY_TYPE_KUNTENG (1<<1)							// For ASCII-Output in Debug mode
 #define DISPLAY_TYPE_DEBUG (1<<0)							// For ASCII-Output in Debug mode);
+//#define BLUETOOTH_SERIALIZE_DISPLAY
 
 #define TRIGGER_OFFSET_ADC 100 // 50
 #define _T 2048     // 2028
@@ -45,11 +46,11 @@
 #define RAMP_END 1600
 #define THROTTLE_OFFSET 50
 #define THROTTLE_MAX 4000
-#define WHEEL_CIRCUMFERENCE 1750 
-#define GEAR_RATIO 18 //dummy for testing
+#define WHEEL_CIRCUMFERENCE 2234
+#define GEAR_RATIO 24
 #define SPEEDLIMIT 45
 #define PULSES_PER_REVOLUTION 1
-#define PH_CURRENT_MAX 350          // in ampere x 10
+#define PH_CURRENT_MAX 400 //350          // in ampere x 10
 #define BATTERYCURRENT_MAX 180      // im ampere x 10
 #define SPEC_ANGLE -167026406L //BionX IGH3 -143165476
 //#define DIRDET
@@ -83,8 +84,8 @@
 
 #define SIXSTEPTHRESHOLD_UP 5586            // 5 kmh    
 #define SIXSTEPTHRESHOLD_DOWN 9310         // 3 kmh
-#define MOTOR_ENABLE_THRESHOLD 1400         // 20 kmh
+#define MOTOR_ENABLE_THRESHOLD 940         // approx 30 kmh
 #define MOTOR_AUTO_ENABLE_THRESHOLD 2800         // 10 kmh
-#define HALL_TIMEOUT 64000                 // 0.58 kmh
+#define HALL_TIMEOUT 64000                 // 0.44 kmh
 
 #endif /* CONFIG_H_ */
