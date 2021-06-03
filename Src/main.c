@@ -841,34 +841,35 @@ int main(void)
                     break;
                 case 3:
                     #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-                    sprintf_(buffer, "Graph:%u$", (uint16_t)MS.u_q);
+                    sprintf_(buffer, "Graph:%ld$", MS.u_q);
                     #else
-                    sprintf_(buffer, "u_q: %u\n", (uint16_t)MS.u_q);
+                    sprintf_(buffer, "u_q: %ld\n", MS.u_q);
                     #endif
                     break;
                 case 4:
                     #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-                    sprintf_(buffer, "Graph:%u$", (uint16_t)q31_degree_to_degree(MS.foc_alpha));
+                    sprintf_(buffer, "Graph:%d$", q31_degree_to_degree(MS.foc_alpha));
                     #else
-                    sprintf_(buffer, "foc_alpha: %u\n", (uint16_t)q31_degree_to_degree(MS.foc_alpha));
+                    sprintf_(buffer, "foc_alpha: %d\n", q31_degree_to_degree(MS.foc_alpha));
                     #endif
                     break;
                 case 5:
                 {
-                    uint32_t phase_current_x10 = CurrentData.q31_battery_current_mA / 100;
-                    phase_current_x10 = phase_current_x10 * 4 * _T / (3 * MS.u_q);
+                    //uint32_t phase_current_x10 = CurrentData.q31_battery_current_mA / 100;
+                    //phase_current_x10 = phase_current_x10 * 4 * _T / (3 * MS.u_q);
+                    q31_t phase_current_x10 =  (CAL_I * MS.i_q) / (32 * 100);
                     #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-                    sprintf_(buffer, "Graph:%u|%u$", (uint16_t)CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+                    sprintf_(buffer, "Graph:%ld|%ld$", CurrentData.q31_battery_current_mA / 100, phase_current_x10);
                     #else
-                    sprintf_(buffer, "cur: %u | ph_cur: %u (A x10)\n", (uint16_t)CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+                    sprintf_(buffer, "cur: %ld | ph_cur: %ld (A x10)\n", CurrentData.q31_battery_current_mA / 100, phase_current_x10);
                     #endif
                     break;
                 }
                 case 6:
                     #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-                    sprintf_(buffer, "Graph:%u|%u$", MS.i_q, MS.i_d);
+                    sprintf_(buffer, "Graph:%ld|%ld$", MS.i_q, MS.i_d);
                     #else
-                    sprintf_(buffer, "i_q: %u | i_d: %u\n", MS.i_q, MS.i_d);
+                    sprintf_(buffer, "i_q: %ld | i_d: %ld\n", MS.i_q, MS.i_d);
                     #endif
                     break;
                 default:

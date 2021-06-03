@@ -117,7 +117,7 @@ void Display_Service(MotorState_t *pMS)
         TxBuff[3] = 0x05;
         TxBuff[4] = 0x0;                     // low voltage
         // battery current
-        if(pMS->q31_battery_current_mA > 0)
+        if(pMS->q31_battery_current_mA > 1000)
             ui16_temp = pMS->q31_battery_current_mA / 333;  // the display expects the batter current in ampere x 3
         else
             ui16_temp = 0;
@@ -139,14 +139,17 @@ void Display_Service(MotorState_t *pMS)
                 TxBuff[8] = 0;
                 break;
             case 1:         //MOTOR_STATE_BLOCKED:
-                TxBuff[8] = 0x21;
+                //TxBuff[8] = 0x21;
+                TxBuff[8] = 0;
                 //DA.Tx.Error = 0;
                 break;
             case 2:         // MOTOR_STATE_PLL_ERROR:
-                TxBuff[8] = 0x22;
+                //TxBuff[8] = 0x22;
+                TxBuff[8] = 0;
                 break;
             case 3:         // MOTOR_STATE_HALL_ERROR:
-                TxBuff[8] = 0x23;
+                //TxBuff[8] = 0x23;
+                TxBuff[8] = 0;
                 break;
             default:
                 TxBuff[8] = 0;
