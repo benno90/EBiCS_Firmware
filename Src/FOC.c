@@ -58,11 +58,10 @@ char PI_flag=0;
 extern TIM_HandleTypeDef htim1;
 
 
-void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int16_t int16_i_q_target, MotorState_t* MS_FOC);
 void svpwm(q31_t q31_u_alpha, q31_t q31_u_beta);
 //void svpwm2(q31_t q31_u_alpha, q31_t q31_u_beta, q31_t q31_angle);
 
-void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int16_t int16_i_q_target, MotorState_t* MS_FOC)
+void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, MotorState_t* MS_FOC)
 {
 
     static uint8_t ui8_foc_counter = 0;

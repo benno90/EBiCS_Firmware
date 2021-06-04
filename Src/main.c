@@ -141,10 +141,7 @@ uint16_t uint16_mapped_throttle=0;
 uint16_t uint16_mapped_PAS=0;
 uint16_t uint16_half_rotation_counter=0;
 uint16_t uint16_full_rotation_counter=0;
-int32_t int32_current_target=0;
-int32_t int32_temp_current_target=0;
 
-//q31_t q31_t_Battery_Current_accumulated=0;
 
 q31_t q31_rotorposition_absolute;
 q31_t q31_rotorposition_hall;
@@ -1624,7 +1621,7 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
     // always do the foc calculation
 	//if (READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
     {
-	    FOC_calculation(i16_ph1_current, i16_ph2_current, q31_rotorposition_absolute, (((int16_t)i8_direction*i8_reverse_flag)*int32_current_target), &MS);
+	    FOC_calculation(i16_ph1_current, i16_ph2_current, q31_rotorposition_absolute, &MS);
 	}
 	//temp5=__HAL_TIM_GET_COUNTER(&htim1);
 	//set PWM
@@ -2576,84 +2573,6 @@ void runPIcontrol()
     PI_flag = 0;
 }
 
-/*void runPIcontrol2(){
-
-    //if(ui8_g_UART_TxCplt_flag)
-    //{
-    //    sprintf_(buffer, "*%d\n", MS.i_q);
-    //    debug_print(buffer, strlen(buffer));
-    //}
-
-		  q31_t_Battery_Current_accumulated -= q31_t_Battery_Current_accumulated>>8;
-		  q31_t_Battery_Current_accumulated += ((MS.i_q*MS.u_abs)>>11)*(uint16_t)(CAL_I>>8);
-
-		  MS.Battery_Current = (q31_t_Battery_Current_accumulated>>8)*i8_direction*i8_reverse_flag; //Battery current in mA
-		  //Check battery current limit
-		  if(MS.Battery_Current>BATTERYCURRENT_MAX) ui8_BC_limit_flag=1;
-		  if(MS.Battery_Current<-REGEN_CURRENT_MAX) ui8_BC_limit_flag=1;
-		  //reset battery current flag with small hysteresis
-		  if(HAL_GPIO_ReadPin(Brake_GPIO_Port, Brake_Pin)){
-			  if(((int32_current_target*MS.u_abs)>>11)*(uint16_t)(CAL_I>>8)<(BATTERYCURRENT_MAX*7)>>3)ui8_BC_limit_flag=0;
-		  }
-		  else{
-			  if(((int32_current_target*MS.u_abs)>>11)*(uint16_t)(CAL_I>>8)>(-REGEN_CURRENT_MAX*7)>>3)ui8_BC_limit_flag=0;
-		  }
-    
-		  //control iq
-
-		  //if
-		  if (!ui8_BC_limit_flag){
-			  PI_iq.recent_value = MS.i_q;
-			  PI_iq.setpoint = i8_direction*i8_reverse_flag*int32_current_target;
-		  }
-		  else{
-			  if(HAL_GPIO_ReadPin(Brake_GPIO_Port, Brake_Pin)){
-				  PI_iq.recent_value=  (MS.Battery_Current>>6)*i8_direction*i8_reverse_flag;
-				  PI_iq.setpoint = (BATTERYCURRENT_MAX>>6)*i8_direction*i8_reverse_flag;
-			  	}
-			  else{
-				  PI_iq.recent_value=  (MS.Battery_Current>>6)*i8_direction*i8_reverse_flag;
-				  PI_iq.setpoint = (-BATTERYCURRENT_MAX>>6)*i8_direction*i8_reverse_flag;
-			    }
-		  }
-		  q31_u_q_temp =  PI_control(&PI_iq);
-
-
-
-		  //Control id
-		  PI_id.recent_value = MS.i_d;
-		  q31_u_d_temp = -PI_control(&PI_id); //control direct current to zero
-
-
-		  	//limit voltage in rotating frame, refer chapter 4.10.1 of UM1052
-		  //MS.u_abs = (q31_t)hypot((double)q31_u_d_temp, (double)q31_u_q_temp); //absolute value of U in static frame
-			arm_sqrt_q31((q31_u_d_temp*q31_u_d_temp+q31_u_q_temp*q31_u_q_temp)<<1,&MS.u_abs);
-			MS.u_abs = (MS.u_abs>>16)+1;
-
-
-			if (MS.u_abs > _U_MAX){
-				MS.u_q = (q31_u_q_temp*_U_MAX)/MS.u_abs; //division!
-				MS.u_d = (q31_u_d_temp*_U_MAX)/MS.u_abs; //division!
-				MS.u_abs = _U_MAX;
-			}
-			else{
-				MS.u_q=q31_u_q_temp;
-				MS.u_d=q31_u_d_temp;
-			}
-            
-            if(DD.go)
-            {
-                MS.u_q = DD.ui16_value;
-            }
-            else
-            {
-                MS.u_q = 0;
-            }
-            MS.u_d = 0;
-
-
-		  	PI_flag=0;
-	  }*/
 
 q31_t speed_PLL (q31_t ist, q31_t soll)
 {
