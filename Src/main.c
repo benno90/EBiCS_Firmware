@@ -334,158 +334,152 @@ static void trigger_motor_error(motor_error_state_t err)
   */
 int main(void)
 {
-  /* USER CODE BEGIN 1 */
+    /* USER CODE BEGIN 1 */
 
+    /* USER CODE END 1 */
 
+    /* MCU Configuration----------------------------------------------------------*/
 
-  /* USER CODE END 1 */
+    /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+    HAL_Init();
 
-  /* MCU Configuration----------------------------------------------------------*/
+    /* USER CODE BEGIN Init */
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+    /* USER CODE END Init */
 
-  /* USER CODE BEGIN Init */
+    /* Configure the system clock */
+    SystemClock_Config();
 
-  /* USER CODE END Init */
+    /* USER CODE BEGIN SysInit */
 
-  /* Configure the system clock */
-  SystemClock_Config();
+    /* USER CODE END SysInit */
 
-  /* USER CODE BEGIN SysInit */
+    /* Initialize all configured peripherals */
+    MX_GPIO_Init();
+    MX_DMA_Init();
+    MX_USART1_UART_Init();
 
-  /* USER CODE END SysInit */
+    //initialize MS struct.
+    MS.hall_angle_detect_flag = 1;
+    MS.Speed = 128000;
+    MS.ui8_assist_level = 1;
+    MS.regen_level = 7;
+    MP.pulses_per_revolution = PULSES_PER_REVOLUTION;
+    MP.wheel_cirumference = WHEEL_CIRCUMFERENCE;
+    MP.speedLimit = SPEEDLIMIT;
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_DMA_Init();
-  MX_USART1_UART_Init();
+    MS.ui8_dbg_log_value = 0;
+    MS.ui16_dbg_value2 = 0;
+    MS.ui16_dbg_value = 0;
+    MS.ui8_go = 0;
+    MS.ui8_log = 1;
 
-  //initialize MS struct.
-  MS.hall_angle_detect_flag=1;
-  MS.Speed=128000;
-  MS.ui8_assist_level=1;
-  MS.regen_level=7;
-  MP.pulses_per_revolution = PULSES_PER_REVOLUTION;
-  MP.wheel_cirumference = WHEEL_CIRCUMFERENCE;
-  MP.speedLimit=SPEEDLIMIT;
+    //
+    BatteryVoltageData.ui8_shift = 5;
+    TemperatureData.ui8_shift = 5;
+    CurrentData.ui8_battery_current_shift = 3;
+    CurrentData.q31_battery_current_mA = 0;
+    CurrentData.q31_battery_current_mA_cumulated = 0;
 
-  MS.ui8_dbg_log_value = 0;
-  MS.ui16_dbg_value2 = 0;
-  MS.ui16_dbg_value = 0;
-  MS.ui8_go = 0;
-  MS.ui8_log = 1;
+//init PI structs
+#define SHIFT_ID 0
+    PI_id.gain_i = I_FACTOR_I_D;
+    PI_id.gain_p = P_FACTOR_I_D;
+    PI_id.setpoint = 0;
+    PI_id.limit_output_max_shifted = Q31_DEGREE * 20 << SHIFT_ID;
+    PI_id.limit_output_min_shifted = -Q31_DEGREE * 20 << SHIFT_ID;
+    PI_id.max_step_shifted = Q31_DEGREE << SHIFT_ID; // shifted value
+    PI_id.shift = SHIFT_ID;
 
-  // 
-  BatteryVoltageData.ui8_shift = 5;
-  TemperatureData.ui8_shift = 5;
-  CurrentData.ui8_battery_current_shift = 3;
-  CurrentData.q31_battery_current_mA = 0;
-  CurrentData.q31_battery_current_mA_cumulated = 0;
-
-  //init PI structs
-  #define SHIFT_ID 0
-  PI_id.gain_i=I_FACTOR_I_D;
-  PI_id.gain_p=P_FACTOR_I_D;
-  PI_id.setpoint = 0;
-  PI_id.limit_output_max_shifted = Q31_DEGREE * 20 << SHIFT_ID;
-  PI_id.limit_output_min_shifted = -Q31_DEGREE * 20 << SHIFT_ID;
-  PI_id.max_step_shifted=Q31_DEGREE << SHIFT_ID;   // shifted value
-  PI_id.shift=SHIFT_ID;
-
-  #define SHIFT_IQ 10
-  PI_iq.gain_i=I_FACTOR_I_Q;
-  PI_iq.gain_p=P_FACTOR_I_Q;
-  PI_iq.setpoint = 0;
-  PI_iq.limit_output_max_shifted = _U_MAX << SHIFT_IQ;
-  PI_iq.limit_output_min_shifted = 0 << SHIFT_IQ;        // currently no regeneration
-  PI_iq.max_step_shifted= 4 << SHIFT_IQ;      // shifted value
-  PI_iq.shift=SHIFT_IQ;
+#define SHIFT_IQ 10
+    PI_iq.gain_i = I_FACTOR_I_Q;
+    PI_iq.gain_p = P_FACTOR_I_Q;
+    PI_iq.setpoint = 0;
+    PI_iq.limit_output_max_shifted = _U_MAX << SHIFT_IQ;
+    PI_iq.limit_output_min_shifted = 0 << SHIFT_IQ; // currently no regeneration
+    PI_iq.max_step_shifted = 4 << SHIFT_IQ;         // shifted value
+    PI_iq.shift = SHIFT_IQ;
 
 #ifdef SPEEDTHROTTLE
 
-  PI_speed.gain_i=I_FACTOR_SPEED;
-  PI_speed.gain_p=P_FACTOR_SPEED;
-  PI_speed.setpoint = 0;
-  PI_speed.limit_output = PH_CURRENT_MAX;
-  PI_speed.max_step=5000;
-  PI_speed.shift=12;
-  PI_speed.limit_i=PH_CURRENT_MAX;
+    PI_speed.gain_i = I_FACTOR_SPEED;
+    PI_speed.gain_p = P_FACTOR_SPEED;
+    PI_speed.setpoint = 0;
+    PI_speed.limit_output = PH_CURRENT_MAX;
+    PI_speed.max_step = 5000;
+    PI_speed.shift = 12;
+    PI_speed.limit_i = PH_CURRENT_MAX;
 
 #endif
 
-  //Virtual EEPROM init
-  HAL_FLASH_Unlock();
-  EE_Init();
-  HAL_FLASH_Lock();
+    //Virtual EEPROM init
+    HAL_FLASH_Unlock();
+    EE_Init();
+    HAL_FLASH_Lock();
 
-  MX_ADC1_Init();
-  /* Run the ADC calibration */
-  if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK)
-  {
-    /* Calibration Error */
-    Error_Handler();
-  }
-  MX_ADC2_Init();
-  /* Run the ADC calibration */
-  if (HAL_ADCEx_Calibration_Start(&hadc2) != HAL_OK)
-  {
-    /* Calibration Error */
-    Error_Handler();
-  }
+    MX_ADC1_Init();
+    /* Run the ADC calibration */
+    if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK)
+    {
+        /* Calibration Error */
+        Error_Handler();
+    }
+    MX_ADC2_Init();
+    /* Run the ADC calibration */
+    if (HAL_ADCEx_Calibration_Start(&hadc2) != HAL_OK)
+    {
+        /* Calibration Error */
+        Error_Handler();
+    }
 
-  /* USER CODE BEGIN 2 */
- SET_BIT(ADC1->CR2, ADC_CR2_JEXTTRIG);//external trigger enable
- __HAL_ADC_ENABLE_IT(&hadc1,ADC_IT_JEOC);
- SET_BIT(ADC2->CR2, ADC_CR2_JEXTTRIG);//external trigger enable
- __HAL_ADC_ENABLE_IT(&hadc2,ADC_IT_JEOC);
+    /* USER CODE BEGIN 2 */
+    SET_BIT(ADC1->CR2, ADC_CR2_JEXTTRIG); //external trigger enable
+    __HAL_ADC_ENABLE_IT(&hadc1, ADC_IT_JEOC);
+    SET_BIT(ADC2->CR2, ADC_CR2_JEXTTRIG); //external trigger enable
+    __HAL_ADC_ENABLE_IT(&hadc2, ADC_IT_JEOC);
 
+    //HAL_ADC_Start_IT(&hadc1);
+    HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)adcData, 7);
+    HAL_ADC_Start_IT(&hadc2);
+    MX_TIM1_Init(); //Hier die Reihenfolge getauscht!
+    MX_TIM2_Init();
+    MX_TIM3_Init();
 
-  //HAL_ADC_Start_IT(&hadc1);
-  HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t*)adcData, 7);
-  HAL_ADC_Start_IT(&hadc2);
-  MX_TIM1_Init(); //Hier die Reihenfolge getauscht!
-  MX_TIM2_Init();
-  MX_TIM3_Init();
-
- // Start Timer 1
-    if(HAL_TIM_Base_Start_IT(&htim1) != HAL_OK)
-      {
+    // Start Timer 1
+    if (HAL_TIM_Base_Start_IT(&htim1) != HAL_OK)
+    {
         /* Counter Enable Error */
         Error_Handler();
-      }
+    }
 
-      HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-      HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1); // turn on complementary channel
-      HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
-      HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_2);
-      HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
-      HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_3);
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+    HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1); // turn on complementary channel
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+    HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_2);
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
+    HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_3);
 
-      HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_4);
-
-
-
+    HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_4);
 
     TIM1->CCR4 = TRIGGER_DEFAULT; //ADC sampling just before timer overflow (just before middle of PWM-Cycle)
-//PWM Mode 1: Interrupt at counting down.
+                                  //PWM Mode 1: Interrupt at counting down.
 
-    //TIM1->BDTR |= 1L<<15;
-   // TIM1->BDTR &= ~(1L<<15); //reset MOE (Main Output Enable) bit to disable PWM output
+    // TIM1->BDTR |= 1L<<15;
+    // TIM1->BDTR &= ~(1L<<15); //reset MOE (Main Output Enable) bit to disable PWM output
     // Start Timer 2
-       if(HAL_TIM_Base_Start_IT(&htim2) != HAL_OK)
-         {
-           /* Counter Enable Error */
-           Error_Handler();
-         }
+    if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK)
+    {
+        /* Counter Enable Error */
+        Error_Handler();
+    }
 
-       // Start Timer 3
+    // Start Timer 3
 
-       if(HAL_TIM_Base_Start_IT(&htim3) != HAL_OK)
-            {
-              /* Counter Enable Error */
-              Error_Handler();
-            }
+    if (HAL_TIM_Base_Start_IT(&htim3) != HAL_OK)
+    {
+        /* Counter Enable Error */
+        Error_Handler();
+    }
 
     Display_Init(&MS);
 
@@ -493,89 +487,85 @@ int main(void)
     TIM1->CCR2 = 1023;
     TIM1->CCR3 = 1023;
 
-
-
-    CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE);//Disable PWM
+    CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE); //Disable PWM
 
     HAL_Delay(200); //wait for stable conditions
 
     BatteryVoltageData.q31_battery_voltage_adc_cumulated = 0;
     TemperatureData.q31_temperature_adc_cumulated = 0;
-    
-    for(i = 0; i < 32; i++)
-	{
-    	while(!ui8_adc_regular_flag){}
-    	ui16_ph1_offset += adcData[2];
-    	ui16_ph2_offset += adcData[3];
-    	ui16_ph3_offset += adcData[4];
-		ui16_torque_offset += adcData[TQ_ADC_INDEX];
+
+    for (i = 0; i < 32; i++)
+    {
+        while (!ui8_adc_regular_flag){}
+        ui16_ph1_offset += adcData[2];
+        ui16_ph2_offset += adcData[3];
+        ui16_ph3_offset += adcData[4];
+        ui16_torque_offset += adcData[TQ_ADC_INDEX];
         BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
         TemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
-    	ui8_adc_regular_flag = 0;
-
+        ui8_adc_regular_flag = 0;
     }
     ui16_ph1_offset = ui16_ph1_offset >> 5;
     ui16_ph2_offset = ui16_ph2_offset >> 5;
     ui16_ph3_offset = ui16_ph3_offset >> 5;
-	ui16_torque_offset = ui16_torque_offset >> 5;
-	ui16_torque_offset += 30; // hardcoded offset -> move to config.h
+    ui16_torque_offset = ui16_torque_offset >> 5;
+    ui16_torque_offset += 30; // hardcoded offset -> move to config.h
 
-    BatteryVoltageData.q31_battery_voltage_adc_cumulated = 
+    BatteryVoltageData.q31_battery_voltage_adc_cumulated =
         (BatteryVoltageData.q31_battery_voltage_adc_cumulated >> 5) << BatteryVoltageData.ui8_shift;
 
-    BatteryVoltageData.q31_battery_voltage_V_x10 = 
+    BatteryVoltageData.q31_battery_voltage_V_x10 =
         (BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> BatteryVoltageData.ui8_shift;
 
-    TemperatureData.q31_temperature_adc_cumulated = 
+    TemperatureData.q31_temperature_adc_cumulated =
         (TemperatureData.q31_temperature_adc_cumulated >> 5) << TemperatureData.ui8_shift;
     TemperatureData.q31_temperature_degrees = 0; // setting it in the slow loop
 
 // comment hochsitzcola 20.05.21
-#ifdef DISABLE_DYNAMIC_ADC // set  injected channel with offsets
-	ADC1->JSQR=0b00100000000000000000; //ADC1 injected reads phase A JL = 0b00, JSQ4 = 0b00100 (decimal 4 = channel 4)
+#ifdef DISABLE_DYNAMIC_ADC               // set  injected channel with offsets
+    ADC1->JSQR = 0b00100000000000000000; //ADC1 injected reads phase A JL = 0b00, JSQ4 = 0b00100 (decimal 4 = channel 4)
     ADC1->JOFR1 = ui16_ph1_offset;
-	ADC2->JSQR=0b00101000000000000000; //ADC2 injected reads phase B, JSQ4 = 0b00101, decimal 5
-	ADC2->JOFR1 = ui16_ph2_offset;
+    ADC2->JSQR = 0b00101000000000000000; //ADC2 injected reads phase B, JSQ4 = 0b00101, decimal 5
+    ADC2->JOFR1 = ui16_ph2_offset;
 #endif
 
-   	ui8_adc_offset_done_flag = 1;
+    ui8_adc_offset_done_flag = 1;
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
-   	printf_("phase current offsets:  %d, %d, %d \n ", ui16_ph1_offset, ui16_ph2_offset, ui16_ph3_offset);
-   	printf_("torque offset:  %d\n", ui16_torque_offset);
+    printf_("phase current offsets:  %d, %d, %d \n ", ui16_ph1_offset, ui16_ph2_offset, ui16_ph3_offset);
+    printf_("torque offset:  %d\n", ui16_torque_offset);
 #if (AUTODETECT == 1)
-   	autodetect();
-	while(1) { };
+    autodetect();
+    while (1) { };
 #endif
 
 #endif
 #if (DISPLAY_TYPE != DISPLAY_TYPE_DEBUG || !AUTODETECT)
-   	EE_ReadVariable(EEPROM_POS_SPEC_ANGLE, &MP.spec_angle);
+    EE_ReadVariable(EEPROM_POS_SPEC_ANGLE, &MP.spec_angle);
 
-   	// set motor specific angle to value from emulated EEPROM only if valid
-   	if(MP.spec_angle!=0xFFFF) {
-   		q31_rotorposition_motor_specific = MP.spec_angle<<16;
-   		EE_ReadVariable(EEPROM_POS_HALL_ORDER, &i16_hall_order);
-   	}
+    // set motor specific angle to value from emulated EEPROM only if valid
+    if (MP.spec_angle != 0xFFFF)
+    {
+        q31_rotorposition_motor_specific = MP.spec_angle << 16;
+        EE_ReadVariable(EEPROM_POS_HALL_ORDER, &i16_hall_order);
+    }
 #endif
 
-	//q31_rotorposition_motor_specific = -167026406;
-	q31_rotorposition_motor_specific = -1789569706;  // -150 degrees
-	//q31_rotorposition_motor_specific = -1801499903;  // -152 degrees
-	//q31_rotorposition_motor_specific = 0;
-	i16_hall_order = 1;
- // set absolute position to corresponding hall pattern.
+    //q31_rotorposition_motor_specific = -167026406;
+    q31_rotorposition_motor_specific = -1789569706; // -150 degrees
+    //q31_rotorposition_motor_specific = -1801499903;  // -152 degrees
+    //q31_rotorposition_motor_specific = 0;
+    i16_hall_order = 1;
+    // set absolute position to corresponding hall pattern.
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
     printf_("Lishui FOC v0.9 \n ");
     printf_("Motor specific angle:  %d, direction %d \n ", q31_rotorposition_motor_specific, i16_hall_order);
 #endif
 
+    CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE); //Disable PWM
 
-    CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE);//Disable PWM
-
-	get_standstill_position();
-
+    get_standstill_position();
 
     /* USER CODE END 2 */
 

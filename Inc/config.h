@@ -16,7 +16,6 @@
 #define DISPLAY_TYPE_BAFANG (1<<2)							// For 'Blaupunkt' Display of Prophete Entdecker
 #define DISPLAY_TYPE_KUNTENG (1<<1)							// For ASCII-Output in Debug mode
 #define DISPLAY_TYPE_DEBUG (1<<0)							// For ASCII-Output in Debug mode);
-//#define BLUETOOTH_SERIALIZE_DISPLAY
 
 #define TRIGGER_OFFSET_ADC 100 // 50
 #define _T 2048     // 2028
@@ -60,6 +59,7 @@
 #define TQ_ADC_INDEX 6  // AD1: 6, SP: 1
 #define TEMP_ADC_INDEX 5 // ADC_CHANNEL_TEMPSENSOR
 //#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
+//#define BLUETOOTH_SERIALIZE_DISPLAY
 #define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
 #define REVERSE 1
 #define PUSHASSIST_CURRENT 30
