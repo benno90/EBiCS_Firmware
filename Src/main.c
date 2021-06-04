@@ -79,8 +79,6 @@ DMA_HandleTypeDef hdma_usart1_rx;
 
 uint32_t ui32_tim1_counter=0;
 uint32_t ui32_tim3_counter=0;
-static uint8_t slow_loop_counter = 0;
-static uint8_t slow_loop_print_counter = 0;
 
 uint8_t ui8_hall_state=0;
 uint8_t ui8_hall_state_old=0;
@@ -101,7 +99,7 @@ int16_t i16_ph3_current=0;
 uint16_t i=0;
 uint16_t j=0;
 uint16_t k=0;
-uint8_t ui8_slowloop_counter=0;
+static uint8_t ui8_slowloop_counter=0;
 volatile uint8_t ui8_adc_inj_flag=0;
 volatile uint8_t ui8_adc_regular_flag=0;
 uint8_t ui8_speedcase=0;
@@ -208,6 +206,13 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
+
+static void process_pedal_data(void);
+static void process_wheel_speed_data(void);
+static void process_battery_voltage(void);
+static void process_chip_temperature(void);
+static void fast_loop_log(void);
+static void debug_comm(void);
 
 static void dyn_adc_state(q31_t angle);
 static void set_inj_channel(char state);
@@ -578,328 +583,88 @@ int main(void)
     {
 
 #if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
-        if(MS.ui16_dbg_value2)
+        if (MS.ui16_dbg_value2)
         {
             trigger_motor_error(MOTOR_STATE_DBG_ERROR);
             MS.ui16_dbg_value2 = 0;
         }
 #endif
 
-        if(PI_flag || !ui8_pwm_enabled_flag)
+        // --------------------------------------------------
+        // PI control
+        //
+
+        if (PI_flag || !ui8_pwm_enabled_flag)
         {
             // only pi control can enable the pwm
             runPIcontrol();
         }
 
-	    //display message processing
-	    if(ui8_g_UART_Rx_flag)
+        // --------------------------------------------------
+        // UART Comm
+        //
+
+        //display message processing
+        if (ui8_g_UART_Rx_flag)
         {
             MS.q31_battery_current_mA = CurrentData.q31_battery_current_mA;
             MS.error_state = enum_motor_error_state; // todo -> move enum_motor_error_state into MS
 
             Display_Service(&MS);
 
-
-            if(MS.ui8_lights)
-   		        HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_SET);   // LED_Pin?
+            if (MS.ui8_lights)
+                HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_SET); // LED_Pin?
             else
-   		        HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_RESET);
+                HAL_GPIO_WritePin(LIGHT_GPIO_Port, LIGHT_Pin, GPIO_PIN_RESET);
 
-	        ui8_g_UART_Rx_flag=0;
-
-	    } // end UART processing
-
-        
-        
-        // --------------------------------------------------
-        // PAS signal processing
-        //
-
-        // TODO move this section to seperate function
-
-        if (ui8_PAS_flag)
-        {
-            if (PedalData.uint32_PAS_counter > 100)  // debounce
-            {
-                PedalData.uint32_PAS_cumulated -= PedalData.uint32_PAS_cumulated >> PedalData.uint8_pas_shift;
-                PedalData.uint32_PAS_cumulated += PedalData.uint32_PAS_counter;
-                PedalData.uint32_PAS = PedalData.uint32_PAS_cumulated >> PedalData.uint8_pas_shift;
-                PedalData.uint32_PAS_raw = PedalData.uint32_PAS_counter;
-
-                PedalData.uint32_PAS_HIGH_accumulated -= PedalData.uint32_PAS_HIGH_accumulated >> PedalData.uint8_pas_shift;
-                PedalData.uint32_PAS_HIGH_accumulated += PedalData.uint32_PAS_HIGH_counter;
-
-                PedalData.uint32_PAS_fraction = (PedalData.uint32_PAS_HIGH_accumulated >> PedalData.uint8_pas_shift) * 100 / PedalData.uint32_PAS;
-                PedalData.uint32_PAS_HIGH_counter = 0;
-                PedalData.uint32_PAS_counter = 0;
-                ui8_PAS_flag = 0;
-
-
-                uint32_t ui32_reg_adc_value_shifted = ui16_reg_adc_value << PedalData.uint8_torque_shift;
-
-                if (ui32_reg_adc_value_shifted > PedalData.uint32_torque_adc_cumulated)
-                {
-                    // accept rising values unfiltered
-                    PedalData.uint32_torque_adc_cumulated = ui32_reg_adc_value_shifted;
-                }
-                else
-                {
-                    // filter falling values
-                    PedalData.uint32_torque_adc_cumulated -= PedalData.uint32_torque_adc_cumulated >> PedalData.uint8_torque_shift;
-                    PedalData.uint32_torque_adc_cumulated += ui16_reg_adc_value;
-                }
-
-                PedalData.uint32_torque_Nm_x10 = 10 * (PedalData.uint32_torque_adc_cumulated >> PedalData.uint8_torque_shift) / CAL_TORQUE;
-            }
-        }
-
-        if (PedalData.uint32_PAS_counter >= PAS_TIMEOUT)
-        {
-            PedalData.uint32_PAS = PAS_TIMEOUT;
-            PedalData.uint32_PAS_raw = PAS_TIMEOUT;
-            PedalData.uint32_PAS_cumulated = PAS_TIMEOUT << PedalData.uint8_pas_shift;
-            PedalData.uint32_torque_adc_cumulated = 0;
-            PedalData.uint32_torque_Nm_x10 = 0;
-        }
-
-        if (PedalData.uint32_PAS_raw >= PAS_TIMEOUT)
-        {
-            PedalData.uint8_pedaling = 0;
-        }
-        else
-        {
-            PedalData.uint8_pedaling = 1;
+            ui8_g_UART_Rx_flag = 0;
         }
 
         // --------------------------------------------------
-        // SPEED signal processing
-        //
+        process_pedal_data();
 
-#if (SPEEDSOURCE == EXTERNAL)
-        if (ui8_external_SPEED_control_flag)
-        {
+        // --------------------------------------------------
+        process_wheel_speed_data();
 
-            if (WheelSpeedData.uint32_external_SPEED_counter > 200)
-            { //debounce
-                WheelSpeedData.uint32_SPEEDx100_kmh_cumulated -= WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> WheelSpeedData.ui8_speed_shift;
-                WheelSpeedData.uint32_SPEEDx100_kmh_cumulated += internal_tics_to_speedx100(WheelSpeedData.uint32_external_SPEED_COUNTER);
-
-                MS.ui16_wheel_time_ms = WheelSpeedData.uint32_external_SPEED_counter / (8 * PULSES_PER_REVOLUTION)
-                
-                WheelSpeedData.uint32_external_SPEED_counter = 0;
-                ui8_external_SPEED_control_flag = 0;
-            }
-        }
-
-#elif (SPEEDSOURCE == INTERNAL)
-
-        if (ui8_internal_SPEED_control_flag)
-        {
-            WheelSpeedData.uint32_SPEEDx100_kmh_cumulated -= WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> WheelSpeedData.ui8_speed_shift;
-            WheelSpeedData.uint32_SPEEDx100_kmh_cumulated += internal_tics_to_speedx100(uint32_tics_filtered >> 3);
-            ui8_internal_SPEED_control_flag = 0;
-		    
-            // period [s] = tics x 6 x GEAR_RATIO / frequency    (frequency = 500kHz)
-            MS.ui16_wheel_time_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / (500);
-        } // end speed processing
-
-#endif
-
-        //------------------------------------------------------------------------------------------------------------
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && defined(FAST_LOOP_LOG))
-		if(ui8_fast_loop_log_state == 2 && ui8_g_UART_TxCplt_flag)
-        {
-            if(k < FAST_LOOP_LOG_SIZE)
-            {
-	            sprintf_(buffer, "%d, %d\n", e_log[k][0], e_log[k][1]);
-			    i = 0;
-			    while (buffer[i] != '\0')
-                {
-			        i++;
-                }
-			    ui8_g_UART_TxCplt_flag=0;
-			    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, i);
-			    k++;
-            }
-            //
-			if (k >= FAST_LOOP_LOG_SIZE)
-            {
-			    k=0;
-                ui8_fast_loop_log_state = 0;
-			}
-		}
-#endif
+        // --------------------------------------------------
+        fast_loop_log();
 
         //----------------------------------------------------------------------------------------------------------------------------------------------------------
         //slow loop procedere @16Hz, for LEV standard every 4th loop run, send page,
         if (ui32_tim3_counter > 500)
         {
 
+            // --------------------------------------------------
+            debug_comm();
+
             if (ui16_motor_init_state_timeout > 0)
             {
                 --ui16_motor_init_state_timeout;
             }
 
-            if (slow_loop_counter == 0)
+            if (ui8_slowloop_counter == 0)
             {
                 // 1Hz process frequency for battery voltage and chip temperature
-                // storing raw adc data
 
-                // ---------------------------------------
-                // process battery voltage
-                BatteryVoltageData.q31_battery_voltage_adc_cumulated -= (BatteryVoltageData.q31_battery_voltage_adc_cumulated >> BatteryVoltageData.ui8_shift);
-                BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
-                BatteryVoltageData.q31_battery_voltage_V_x10 =
-                    (BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> BatteryVoltageData.ui8_shift;
+                // --------------------------------------------------
+                process_battery_voltage();
+                process_chip_temperature();
 
-                // ---------------------------------------
-                // process temperature
-
-                TemperatureData.q31_temperature_adc_cumulated -= (TemperatureData.q31_temperature_adc_cumulated >> TemperatureData.ui8_shift);
-                TemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
-
-                // data sheet STM32F103x4
-                // 5.3.19 Temperature sensor characteristics
-                // avg voltage at 25 degrees 1.43 V
-                // avg solpe 4.3 mV / degree
-
-                // recover voltage (3.3V  ref voltage, 2^12 = 4096)
-                // int32_t v_temp = adcData[TEMP_ADC_INDEX] * 3300 >> 12; // voltage in mV
-                int32_t v_temp = (TemperatureData.q31_temperature_adc_cumulated >> TemperatureData.ui8_shift) * 3300 >> 12; // voltage in mV
-                //
-                v_temp = (1430 - v_temp) * 10 / 43 + 25;
-                if (v_temp > 0)
-                {
-                    TemperatureData.q31_temperature_degrees = v_temp;
-                }
-                else
-                {
-                    TemperatureData.q31_temperature_degrees = 0;
-                }
+                ui8_slowloop_counter = 16;
             }
             else
-            {
-                slow_loop_counter = 16;
-            }
-
-            if (WheelSpeedData.uint32_external_SPEED_counter > 127999)
-            {
-#if (SPEEDSOURCE == EXTERNAL)
-                WheelSpeedData.uint32_SPEEDx100_kmh_cumulated = 0;
-#endif
-            }
-
-//#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && !defined(FAST_LOOP_LOG))
-#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
-
-            //print values for debugging
-
-            if (slow_loop_print_counter == 0)
-            {
-
-                switch (MS.ui8_dbg_log_value)
-                {
-                case 0:
-                    #ifndef BLUETOOTH_SERIALIZE_DISPLAY
-                    // plot anything here
-                    //sprintf_(buffer, "%u %u T: %u  U: %u\n", enum_motor_error_state, ui8_six_step_hall_count, (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
-                    //uint32_t ui32_KV = ((ui16_timertics * BatteryVoltageData.q31_battery_voltage_V_x10) >> 11) * MS.u_q;
-                    //sprintf_(buffer, "kv: %lu\n", ui32_KV);
-                    //
-                    //uint32_t ui32_KV = 260000;
-                    //uint32_t u_q = ui32_KV * _T / (BatteryVoltageData.q31_battery_voltage_V_x10 * ui16_timertics);
-                    //sprintf_(buffer, "%lu %lu | %u %lu\n", u_q, MS.u_q, ui16_timertics, uint32_tics_filtered >> 3);
-                    //
-                    //sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, enum_motor_error_state, enum_hall_angle_state, ui8_motor_error_state_hall_count);
-                    sprintf_(buffer, "%u %lu %lu\n", ui16_reg_adc_value, PedalData.uint32_torque_Nm_x10, PedalData.uint32_PAS);
-                    //
-                    #endif
-                    break;
-                case 1:
-                {
-                    uint16_t velocity_kmh = 2234 * 50 * 36 / (6 * GEAR_RATIO * (uint32_tics_filtered >> 3));
-                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-                    sprintf_(buffer, "Graph:%u$", velocity_kmh);
-                    #else
-                    sprintf_(buffer, "v_kmh: %u\n", velocity_kmh);
-                    #endif
-                    break;
-                }
-                case 2:
-                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-                    sprintf_(buffer, "Graph:%u|%u$", (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
-                    #else
-                    sprintf_(buffer, "T: %u | U: %u\n", (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
-                    #endif
-                    break;
-                case 3:
-                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-                    sprintf_(buffer, "Graph:%ld$", MS.u_q);
-                    #else
-                    sprintf_(buffer, "u_q: %ld\n", MS.u_q);
-                    #endif
-                    break;
-                case 4:
-                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-                    sprintf_(buffer, "Graph:%d$", q31_degree_to_degree(MS.foc_alpha));
-                    #else
-                    sprintf_(buffer, "foc_alpha: %d\n", q31_degree_to_degree(MS.foc_alpha));
-                    #endif
-                    break;
-                case 5:
-                {
-                    //uint32_t phase_current_x10 = CurrentData.q31_battery_current_mA / 100;
-                    //phase_current_x10 = phase_current_x10 * 4 * _T / (3 * MS.u_q);
-                    q31_t phase_current_x10 =  (CAL_I * MS.i_q) / (32 * 100);
-                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-                    sprintf_(buffer, "Graph:%ld|%ld$", CurrentData.q31_battery_current_mA / 100, phase_current_x10);
-                    #else
-                    sprintf_(buffer, "cur: %ld | ph_cur: %ld (A x10)\n", CurrentData.q31_battery_current_mA / 100, phase_current_x10);
-                    #endif
-                    break;
-                }
-                case 6:
-                    #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-                    sprintf_(buffer, "Graph:%ld|%ld$", MS.i_q, MS.i_d);
-                    #else
-                    sprintf_(buffer, "i_q: %ld | i_d: %ld\n", MS.i_q, MS.i_d);
-                    #endif
-                    break;
-                default:
-
-                    sprintf_(buffer, ".");
-                    break;
-                }
-                
-                debug_print((uint8_t* ) buffer, strnlen(buffer, 100));
-
-                #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-                slow_loop_print_counter = 0;
-                #else
-                slow_loop_print_counter = 32;
-                #endif
-            }
-            else
-            {
-                --slow_loop_print_counter;
-            }
-
-#endif
-
-            ui32_tim3_counter = 0;
-            if (ui8_slowloop_counter > 0)
             {
                 --ui8_slowloop_counter;
             }
-        } // end of slow loop
 
-  /* USER CODE END WHILE */
+            ui32_tim3_counter = 0;
+        }
 
-  /* USER CODE BEGIN 3 */
+        /* USER CODE END WHILE */
 
-  }
-  /* USER CODE END 3 */
+        /* USER CODE BEGIN 3 */
+    }
+    /* USER CODE END 3 */
 
 } // end main while loop
 
@@ -1387,6 +1152,264 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+static void process_pedal_data(void)
+{
+    if (ui8_PAS_flag)
+    {
+        if (PedalData.uint32_PAS_counter > 100)  // debounce
+        {
+            PedalData.uint32_PAS_cumulated -= PedalData.uint32_PAS_cumulated >> PedalData.uint8_pas_shift;
+            PedalData.uint32_PAS_cumulated += PedalData.uint32_PAS_counter;
+            PedalData.uint32_PAS = PedalData.uint32_PAS_cumulated >> PedalData.uint8_pas_shift;
+            PedalData.uint32_PAS_raw = PedalData.uint32_PAS_counter;
+
+            PedalData.uint32_PAS_HIGH_accumulated -= PedalData.uint32_PAS_HIGH_accumulated >> PedalData.uint8_pas_shift;
+            PedalData.uint32_PAS_HIGH_accumulated += PedalData.uint32_PAS_HIGH_counter;
+
+            PedalData.uint32_PAS_fraction = (PedalData.uint32_PAS_HIGH_accumulated >> PedalData.uint8_pas_shift) * 100 / PedalData.uint32_PAS;
+            PedalData.uint32_PAS_HIGH_counter = 0;
+            PedalData.uint32_PAS_counter = 0;
+            ui8_PAS_flag = 0;
+
+
+            uint32_t ui32_reg_adc_value_shifted = ui16_reg_adc_value << PedalData.uint8_torque_shift;
+
+            if (ui32_reg_adc_value_shifted > PedalData.uint32_torque_adc_cumulated)
+            {
+                // accept rising values unfiltered
+                PedalData.uint32_torque_adc_cumulated = ui32_reg_adc_value_shifted;
+            }
+            else
+            {
+                // filter falling values
+                PedalData.uint32_torque_adc_cumulated -= PedalData.uint32_torque_adc_cumulated >> PedalData.uint8_torque_shift;
+                PedalData.uint32_torque_adc_cumulated += ui16_reg_adc_value;
+            }
+
+            PedalData.uint32_torque_Nm_x10 = 10 * (PedalData.uint32_torque_adc_cumulated >> PedalData.uint8_torque_shift) / CAL_TORQUE;
+        }
+    }
+
+    if (PedalData.uint32_PAS_counter >= PAS_TIMEOUT)
+    {
+        PedalData.uint32_PAS = PAS_TIMEOUT;
+        PedalData.uint32_PAS_raw = PAS_TIMEOUT;
+        PedalData.uint32_PAS_cumulated = PAS_TIMEOUT << PedalData.uint8_pas_shift;
+        PedalData.uint32_torque_adc_cumulated = 0;
+        PedalData.uint32_torque_Nm_x10 = 0;
+    }
+
+    if (PedalData.uint32_PAS_raw >= PAS_TIMEOUT)
+    {
+        PedalData.uint8_pedaling = 0;
+    }
+    else
+    {
+        PedalData.uint8_pedaling = 1;
+    }
+}
+
+static void process_wheel_speed_data(void)
+{
+#if (SPEEDSOURCE == EXTERNAL)
+    if (ui8_external_SPEED_control_flag)
+    {
+
+        if (WheelSpeedData.uint32_external_SPEED_counter > 200)
+        { //debounce
+            WheelSpeedData.uint32_SPEEDx100_kmh_cumulated -= WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> WheelSpeedData.ui8_speed_shift;
+            WheelSpeedData.uint32_SPEEDx100_kmh_cumulated += internal_tics_to_speedx100(WheelSpeedData.uint32_external_SPEED_COUNTER);
+
+            MS.ui16_wheel_time_ms = WheelSpeedData.uint32_external_SPEED_counter * PULSES_PER_REVOLUTION / 8
+            
+            WheelSpeedData.uint32_external_SPEED_counter = 0;
+            ui8_external_SPEED_control_flag = 0;
+        }
+    }
+            
+    if (WheelSpeedData.uint32_external_SPEED_counter > 127999)
+    {
+        WheelSpeedData.uint32_SPEEDx100_kmh_cumulated = 0;
+    }
+
+#elif (SPEEDSOURCE == INTERNAL)
+
+    if (ui8_internal_SPEED_control_flag)
+    {
+        WheelSpeedData.uint32_SPEEDx100_kmh_cumulated -= WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> WheelSpeedData.ui8_speed_shift;
+        WheelSpeedData.uint32_SPEEDx100_kmh_cumulated += internal_tics_to_speedx100(uint32_tics_filtered >> 3);
+        ui8_internal_SPEED_control_flag = 0;
+		  
+        // period [s] = tics x 6 x GEAR_RATIO / frequency    (frequency = 500kHz)
+        MS.ui16_wheel_time_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / (500);
+    }
+
+#endif
+}
+
+static void process_battery_voltage(void)
+{
+    BatteryVoltageData.q31_battery_voltage_adc_cumulated -= (BatteryVoltageData.q31_battery_voltage_adc_cumulated >> BatteryVoltageData.ui8_shift);
+    BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
+    BatteryVoltageData.q31_battery_voltage_V_x10 =
+        (BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> BatteryVoltageData.ui8_shift;
+}
+
+static void process_chip_temperature(void)
+{
+    TemperatureData.q31_temperature_adc_cumulated -= (TemperatureData.q31_temperature_adc_cumulated >> TemperatureData.ui8_shift);
+    TemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
+
+    // data sheet STM32F103x4
+    // 5.3.19 Temperature sensor characteristics
+    // avg voltage at 25 degrees 1.43 V
+    // avg solpe 4.3 mV / degree
+
+    // recover voltage (3.3V  ref voltage, 2^12 = 4096)
+    // int32_t v_temp = adcData[TEMP_ADC_INDEX] * 3300 >> 12; // voltage in mV
+    int32_t v_temp = (TemperatureData.q31_temperature_adc_cumulated >> TemperatureData.ui8_shift) * 3300 >> 12; // voltage in mV
+    //
+    v_temp = (1430 - v_temp) * 10 / 43 + 25;
+    if (v_temp > 0)
+    {
+        TemperatureData.q31_temperature_degrees = v_temp;
+    }
+    else
+    {
+        TemperatureData.q31_temperature_degrees = 0;
+    }
+
+}
+
+static void fast_loop_log(void)
+{
+#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && defined(FAST_LOOP_LOG))
+    if (ui8_fast_loop_log_state == 2 && ui8_g_UART_TxCplt_flag)
+    {
+        if (k < FAST_LOOP_LOG_SIZE)
+        {
+            sprintf_(buffer, "%d, %d\n", e_log[k][0], e_log[k][1]);
+            i = 0;
+            while (buffer[i] != '\0')
+            {
+                i++;
+            }
+            ui8_g_UART_TxCplt_flag = 0;
+            HAL_UART_Transmit_DMA(&huart1, (uint8_t *)&buffer, i);
+            k++;
+        }
+        //
+        if (k >= FAST_LOOP_LOG_SIZE)
+        {
+            k = 0;
+            ui8_fast_loop_log_state = 0;
+        }
+    }
+#endif
+}
+
+static void debug_comm(void)
+{
+//#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG && !defined(FAST_LOOP_LOG))
+#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
+
+    static uint8_t ui8_dbg_print_counter = 0;
+
+    //print values for debugging
+
+    if (ui8_dbg_print_counter == 0)
+    {
+
+        switch (MS.ui8_dbg_log_value)
+        {
+        case 0:
+#ifndef BLUETOOTH_SERIALIZE_DISPLAY
+            // plot anything here
+            //sprintf_(buffer, "%u %u T: %u  U: %u\n", enum_motor_error_state, ui8_six_step_hall_count, (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+            //uint32_t ui32_KV = ((ui16_timertics * BatteryVoltageData.q31_battery_voltage_V_x10) >> 11) * MS.u_q;
+            //sprintf_(buffer, "kv: %lu\n", ui32_KV);
+            //
+            //uint32_t ui32_KV = 260000;
+            //uint32_t u_q = ui32_KV * _T / (BatteryVoltageData.q31_battery_voltage_V_x10 * ui16_timertics);
+            //sprintf_(buffer, "%lu %lu | %u %lu\n", u_q, MS.u_q, ui16_timertics, uint32_tics_filtered >> 3);
+            //
+            //sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, enum_motor_error_state, enum_hall_angle_state, ui8_motor_error_state_hall_count);
+            sprintf_(buffer, "%u %lu %lu\n", ui16_reg_adc_value, PedalData.uint32_torque_Nm_x10, PedalData.uint32_PAS);
+//
+#endif
+            break;
+        case 1:
+        {
+            uint16_t velocity_kmh = 2234 * 50 * 36 / (6 * GEAR_RATIO * (uint32_tics_filtered >> 3));
+#ifdef BLUETOOTH_SERIALIZE_DISPLAY
+            sprintf_(buffer, "Graph:%u$", velocity_kmh);
+#else
+            sprintf_(buffer, "v_kmh: %u\n", velocity_kmh);
+#endif
+            break;
+        }
+        case 2:
+#ifdef BLUETOOTH_SERIALIZE_DISPLAY
+            sprintf_(buffer, "Graph:%u|%u$", (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+#else
+            sprintf_(buffer, "T: %u | U: %u\n", (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+#endif
+            break;
+        case 3:
+#ifdef BLUETOOTH_SERIALIZE_DISPLAY
+            sprintf_(buffer, "Graph:%ld$", MS.u_q);
+#else
+            sprintf_(buffer, "u_q: %ld\n", MS.u_q);
+#endif
+            break;
+        case 4:
+#ifdef BLUETOOTH_SERIALIZE_DISPLAY
+            sprintf_(buffer, "Graph:%d$", q31_degree_to_degree(MS.foc_alpha));
+#else
+            sprintf_(buffer, "foc_alpha: %d\n", q31_degree_to_degree(MS.foc_alpha));
+#endif
+            break;
+        case 5:
+        {
+            //uint32_t phase_current_x10 = CurrentData.q31_battery_current_mA / 100;
+            //phase_current_x10 = phase_current_x10 * 4 * _T / (3 * MS.u_q);
+            q31_t phase_current_x10 = (CAL_I * MS.i_q) / (32 * 100);
+#ifdef BLUETOOTH_SERIALIZE_DISPLAY
+            sprintf_(buffer, "Graph:%ld|%ld$", CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+#else
+            sprintf_(buffer, "cur: %ld | ph_cur: %ld (A x10)\n", CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+#endif
+            break;
+        }
+        case 6:
+#ifdef BLUETOOTH_SERIALIZE_DISPLAY
+            sprintf_(buffer, "Graph:%ld|%ld$", MS.i_q, MS.i_d);
+#else
+            sprintf_(buffer, "i_q: %ld | i_d: %ld\n", MS.i_q, MS.i_d);
+#endif
+            break;
+        default:
+
+            sprintf_(buffer, ".");
+            break;
+        }
+
+        debug_print((uint8_t *)buffer, strnlen(buffer, 100));
+
+#ifdef BLUETOOTH_SERIALIZE_DISPLAY
+        ui8_dbg_print_counter = 0;
+#else
+        ui8_dbg_print_counter = 16;
+#endif
+    }
+    else
+    {
+        --ui8_dbg_print_counter;
+    }
+
+#endif
+}
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
