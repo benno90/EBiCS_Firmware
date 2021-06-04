@@ -89,7 +89,6 @@ uint16_t ui16_tim2_recent=0;
 uint16_t ui16_timertics = HALL_TIMEOUT; 					//timertics between two hall events for 60° interpolation
 uint8_t ui8_hall_timeout_flag = 1;
 uint16_t ui16_reg_adc_value; // torque
-uint32_t ui32_reg_adc_value_filter;
 uint16_t ui16_ph1_offset=0;
 uint16_t ui16_ph2_offset=0;
 uint16_t ui16_ph3_offset=0;
@@ -114,19 +113,11 @@ volatile uint8_t ui8_adc_offset_done_flag=0;
 volatile uint8_t ui8_Push_Assist_flag=0;
 volatile uint8_t ui8_PAS_flag=0;
 volatile uint8_t ui8_SPEED_flag=0;
-volatile uint8_t ui8_SPEED_control_flag=0;
+volatile uint8_t ui8_internal_SPEED_control_flag=0;
 volatile uint8_t ui8_BC_limit_flag=0;  //flag for Battery current limitation
 volatile uint8_t ui8_6step_flag=0;
-uint32_t uint32_PAS_counter = PAS_TIMEOUT;
-uint32_t uint32_PAS_HIGH_counter= 0;
-uint32_t uint32_PAS_HIGH_accumulated= 32000;
-uint32_t uint32_PAS_fraction= 100;
 uint32_t uint32_SPEED_counter=32000;
 uint32_t uint32_SPEEDx100_cumulated=0;
-uint32_t uint32_PAS=32000;
-
-uint32_t uint32_PAS_raw=32000;
-uint8_t uint8_pedaling = 0;
 
 q31_t q31_rotorposition_PLL = 0;
 q31_t q31_pll_angle_per_tic = 0;
@@ -135,8 +126,6 @@ uint8_t ui8_UART_Counter=0;
 int8_t i8_recent_rotor_direction=1;
 int16_t i16_hall_order=1;
 
-uint32_t uint32_torque_cumulated=0;
-uint32_t uint32_PAS_cumulated=32000;
 uint16_t uint16_mapped_throttle=0;
 uint16_t uint16_mapped_PAS=0;
 uint16_t uint16_half_rotation_counter=0;
@@ -174,6 +163,7 @@ MotorParams_t MP;
 CurrentData_t CurrentData;
 BatteryVoltageData_t BatteryVoltageData;
 TemperatureData_t TemperatureData;
+PedalData_t PedalData;
 
 //structs for PI_control
 PI_control_t PI_iq;   // todo: rename to PI_amplitude
@@ -381,6 +371,21 @@ int main(void)
     CurrentData.q31_battery_current_mA = 0;
     CurrentData.q31_battery_current_mA_cumulated = 0;
 
+    //
+    PedalData.uint8_pas_shift = 2;
+    PedalData.uint32_PAS_counter = PAS_TIMEOUT;
+    PedalData.uint32_PAS = PAS_TIMEOUT;
+    PedalData.uint32_PAS_raw = PAS_TIMEOUT;
+    PedalData.uint32_PAS_cumulated = PAS_TIMEOUT << PedalData.uint8_pas_shift;
+    PedalData.uint32_PAS_HIGH_counter = 0;
+    PedalData.uint32_PAS_HIGH_accumulated = 32000;
+    PedalData.uint32_PAS_fraction = 100;
+    //
+    PedalData.uint8_torque_shift = 4;
+    PedalData.uint32_torque_adc_cumulated = 0;
+    PedalData.uint32_torque_Nm_x10 = 0;
+
+
 //init PI structs
 #define SHIFT_ID 0
     PI_id.gain_i = I_FACTOR_I_D;
@@ -574,11 +579,13 @@ int main(void)
     while (1)
     {
 
+#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
         if(MS.ui16_dbg_value2)
         {
             trigger_motor_error(MOTOR_STATE_DBG_ERROR);
             MS.ui16_dbg_value2 = 0;
         }
+#endif
 
         if(PI_flag || !ui8_pwm_enabled_flag)
         {
@@ -613,64 +620,66 @@ int main(void)
         // PAS signal processing
         //
 
+        // TODO move this section to seperate function
+
         if (ui8_PAS_flag)
         {
-            if (uint32_PAS_counter > 100)
+            if (PedalData.uint32_PAS_counter > 100)  // debounce
             {
-                //debounce
-                uint32_PAS_cumulated -= uint32_PAS_cumulated >> 2;
-                uint32_PAS_cumulated += uint32_PAS_counter;
-                uint32_PAS = uint32_PAS_cumulated >> 2;
-                uint32_PAS_raw = uint32_PAS_counter;
+                PedalData.uint32_PAS_cumulated -= PedalData.uint32_PAS_cumulated >> PedalData.uint8_pas_shift;
+                PedalData.uint32_PAS_cumulated += PedalData.uint32_PAS_counter;
+                PedalData.uint32_PAS = PedalData.uint32_PAS_cumulated >> PedalData.uint8_pas_shift;
+                PedalData.uint32_PAS_raw = PedalData.uint32_PAS_counter;
 
-                uint32_PAS_HIGH_accumulated -= uint32_PAS_HIGH_accumulated >> 2;
-                uint32_PAS_HIGH_accumulated += uint32_PAS_HIGH_counter;
+                PedalData.uint32_PAS_HIGH_accumulated -= PedalData.uint32_PAS_HIGH_accumulated >> PedalData.uint8_pas_shift;
+                PedalData.uint32_PAS_HIGH_accumulated += PedalData.uint32_PAS_HIGH_counter;
 
-                uint32_PAS_fraction = (uint32_PAS_HIGH_accumulated >> 2) * 100 / uint32_PAS;
-                uint32_PAS_HIGH_counter = 0;
-                uint32_PAS_counter = 0;
+                PedalData.uint32_PAS_fraction = (PedalData.uint32_PAS_HIGH_accumulated >> PedalData.uint8_pas_shift) * 100 / PedalData.uint32_PAS;
+                PedalData.uint32_PAS_HIGH_counter = 0;
+                PedalData.uint32_PAS_counter = 0;
                 ui8_PAS_flag = 0;
-                //read in and sum up torque-signal within one crank revolution (for sempu sensor 32 PAS pulses/revolution, 2^5=32)
 
-                //uint32_torque_cumulated -= uint32_torque_cumulated >> 5;
-                //uint32_torque_cumulated += ui16_reg_adc_value;
 
-                uint32_t ui32_reg_adc_value_shifted = ui16_reg_adc_value << 4;
+                uint32_t ui32_reg_adc_value_shifted = ui16_reg_adc_value << PedalData.uint8_torque_shift;
 
-                if (ui32_reg_adc_value_shifted > uint32_torque_cumulated)
+                if (ui32_reg_adc_value_shifted > PedalData.uint32_torque_adc_cumulated)
                 {
                     // accept rising values unfiltered
-                    uint32_torque_cumulated = ui32_reg_adc_value_shifted;
+                    PedalData.uint32_torque_adc_cumulated = ui32_reg_adc_value_shifted;
                 }
                 else
                 {
                     // filter falling values
-                    uint32_torque_cumulated -= uint32_torque_cumulated >> 4;
-                    uint32_torque_cumulated += ui16_reg_adc_value;
+                    PedalData.uint32_torque_adc_cumulated -= PedalData.uint32_torque_adc_cumulated >> PedalData.uint8_torque_shift;
+                    PedalData.uint32_torque_adc_cumulated += ui16_reg_adc_value;
                 }
+
+                PedalData.uint32_torque_Nm_x10 = 10 * (PedalData.uint32_torque_adc_cumulated >> PedalData.uint8_torque_shift) / CAL_TORQUE;
             }
         }
 
-        if (uint32_PAS_counter >= PAS_TIMEOUT)
+        if (PedalData.uint32_PAS_counter >= PAS_TIMEOUT)
         {
-            uint32_PAS = PAS_TIMEOUT;
-            uint32_PAS_raw = PAS_TIMEOUT;
-            uint32_PAS_cumulated = PAS_TIMEOUT << 2;
-            uint32_torque_cumulated = 0;
+            PedalData.uint32_PAS = PAS_TIMEOUT;
+            PedalData.uint32_PAS_raw = PAS_TIMEOUT;
+            PedalData.uint32_PAS_cumulated = PAS_TIMEOUT << PedalData.uint8_pas_shift;
+            PedalData.uint32_torque_adc_cumulated = 0;
+            PedalData.uint32_torque_Nm_x10 = 0;
         }
 
-        if (uint32_PAS_raw >= PAS_TIMEOUT)
+        if (PedalData.uint32_PAS_raw >= PAS_TIMEOUT)
         {
-            uint8_pedaling = 0;
+            PedalData.uint8_pedaling = 0;
         }
         else
         {
-            uint8_pedaling = 1;
+            PedalData.uint8_pedaling = 1;
         }
 
         // --------------------------------------------------
         // SPEED signal processing
         //
+        // TODO: WheelSpeedData struct ..
 
         if (ui8_SPEED_flag)
         { // benno: this part seems to be for the external sensor
@@ -689,13 +698,13 @@ int main(void)
             }
         }
 
-        if (ui8_SPEED_control_flag)
+        if (ui8_internal_SPEED_control_flag)
         {
 #if (SPEEDSOURCE == INTERNAL)
             uint32_SPEEDx100_cumulated -= uint32_SPEEDx100_cumulated >> SPEEDFILTER;
             uint32_SPEEDx100_cumulated += internal_tics_to_speedx100(uint32_tics_filtered >> 3);
 #endif
-            ui8_SPEED_control_flag = 0;
+            ui8_internal_SPEED_control_flag = 0;
         } // end speed processing
 
         //------------------------------------------------------------------------------------------------------------
@@ -805,7 +814,8 @@ int main(void)
                     //uint32_t u_q = ui32_KV * _T / (BatteryVoltageData.q31_battery_voltage_V_x10 * ui16_timertics);
                     //sprintf_(buffer, "%lu %lu | %u %lu\n", u_q, MS.u_q, ui16_timertics, uint32_tics_filtered >> 3);
                     //
-                    sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, enum_motor_error_state, enum_hall_angle_state, ui8_motor_error_state_hall_count);
+                    //sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, enum_motor_error_state, enum_hall_angle_state, ui8_motor_error_state_hall_count);
+                    sprintf_(buffer, "%u %lu %lu\n", ui16_reg_adc_value, PedalData.uint32_torque_Nm_x10, PedalData.uint32_PAS);
                     //
                     #endif
                     break;
@@ -1387,10 +1397,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	{
 		if(ui32_tim3_counter < 32000) ui32_tim3_counter++;
 		//
-		if(uint32_PAS_counter < PAS_TIMEOUT)
+		if(PedalData.uint32_PAS_counter < PAS_TIMEOUT)
 		{
-			uint32_PAS_counter++;
-			if(HAL_GPIO_ReadPin(PAS_GPIO_Port, PAS_Pin)) uint32_PAS_HIGH_counter++;
+			PedalData.uint32_PAS_counter++;
+			if(HAL_GPIO_ReadPin(PAS_GPIO_Port, PAS_Pin)) 
+            {
+                PedalData.uint32_PAS_HIGH_counter++;
+            }
 		}
 		//
 		if (uint32_SPEED_counter<128000)uint32_SPEED_counter++;					//counter for external Speedsensor
@@ -1413,6 +1426,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 // regular ADC callback
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
+    static uint32_t ui32_reg_adc_value_filter = 0;
+#ifdef TS_MODE
+
 	uint16_t torque_adc = adcData[TQ_ADC_INDEX];
 
 	if(torque_adc > ui16_torque_offset)
@@ -1431,7 +1447,16 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 	}
 		
 		
-	ui8_adc_regular_flag=1;
+#else
+
+    // todo: program whatever you need here for throttle mode
+
+    ui16_reg_adc_value = 0; 
+    ui32_reg_adc_value_filter = 0;
+
+#endif
+	
+    ui8_adc_regular_flag=1;
 
 }
 
@@ -1671,7 +1696,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             		uint32_tics_filtered-=uint32_tics_filtered>>3;
             		uint32_tics_filtered+=ui16_timertics;
             	    __HAL_TIM_SET_COUNTER(&htim2,0); //reset tim2 counter
-            	    ui8_SPEED_control_flag=1;
+            	    ui8_internal_SPEED_control_flag=1;
 
                     if(ui8_extrapolation_hall_count > 0) --ui8_extrapolation_hall_count;
                     if(ui8_six_step_hall_count > 0) -- ui8_six_step_hall_count;
@@ -2228,7 +2253,7 @@ static q31_t get_target_power()
     // --------------------------------------------------------
     // regular power control
 
-    if(uint32_PAS < PAS_TIMEOUT)
+    if(PedalData.uint32_PAS < PAS_TIMEOUT)
     {
 
 
@@ -2236,27 +2261,28 @@ static q31_t get_target_power()
 
         //return DA.Rx.AssistLevel * 10;
 
-        uint32_t PAS_mod = uint32_PAS;
-        if(PAS_mod < PAS_TIMEOUT && PAS_mod > 500)     // 660
+        uint32_t PAS_mod = PedalData.uint32_PAS;
+        if(PAS_mod > 660)
         {
-            PAS_mod = 500;  // 43 rpm from the beginning!
+            PAS_mod = 660;  // 33 rpm from the beginning!
         }
 
 
         
-        //uint32_t pas_rpm = 21818 / uint32_PAS;
+        // tics to omega -> omega = 2285 / tics
+        // tics to rpm -> rpm = 21818 / tics 
         //
 #if DISPLAY_TYPE == DISPLAY_TYPE_AUREUS
-        uint32_t pas_omega_x10 = (2285 * (MS.ui8_assist_level >> 3)) / uint32_PAS;                // including the assistfactor x10
+        uint32_t pas_omega_x10 = (2285 * MS.ui8_assist_level) / PAS_mod;               // including the assistfactor x10
 #else
-        uint32_t pas_omega_x10 = (2285 * (MS.ui16_dbg_value)) / uint32_PAS;                // including the assistfactor x10
+        uint32_t pas_omega_x10 = (2285 * (MS.ui16_dbg_value)) / PAS_mod;                // including the assistfactor x10
 #endif
         //uint32_t pas_omega_x10 = (2285 * (28)) / uint32_PAS;                // including the assistfactor x10
         //uint32_t pas_omega_x10 = (2285 * (DD.ui16_value)) / uint32_PAS;                // including the assistfactor x10
         //uint32_t pas_omega_x10 = (2285 * (1.0)) / PAS_mod;                // including the assistfactor x10
     	//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
-    	uint16_t torque_nm = (uint32_torque_cumulated >> 4) >> 4;
-    	uint16_t pedal_power_x10 = pas_omega_x10 * torque_nm;
+    	//uint16_t torque_nm = (uint32_torque_cumulated >> 4) >> 4;
+    	q31_t pedal_power_x10 = (pas_omega_x10 * PedalData.uint32_torque_Nm_x10) / 10;
         return pedal_power_x10;
     }
     else

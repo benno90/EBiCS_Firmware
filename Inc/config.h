@@ -25,6 +25,7 @@
 #define CAL_BAT_V 25   
 #define CAL_V 25     // adcData[0] * CAL_V = voltage in mV
 #define CAL_I 55      //38       
+#define CAL_TORQUE 16
 #define INDUCTANCE 6LL
 #define RESISTANCE 40LL
 #define FLUX_LINKAGE 1200LL

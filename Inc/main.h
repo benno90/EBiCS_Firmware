@@ -107,7 +107,6 @@ void UART_IdleItCallback(void);
 
 extern uint16_t switchtime[3];
 extern uint32_t ui32_tim1_counter;
-extern uint32_t uint32_PAS_counter;
 
 typedef struct
 {
@@ -130,6 +129,29 @@ typedef struct
     q31_t           ui8_battery_current_shift;
 } CurrentData_t;
 
+typedef struct 
+{
+    // PAS data (pedal speed)
+    uint32_t       uint32_PAS_counter;              // 8kHz counter (tim3)
+    uint32_t       uint32_PAS;                      // tics between two pas sensor events (filtered)
+    uint32_t       uint32_PAS_raw;                  // tics between two pas sensor events (raw)
+    uint32_t       uint32_PAS_cumulated;            // tics between two pas sensor events (cumulated)
+    uint8_t        uint8_pas_shift;
+    uint8_t        uint8_pedaling;                  // 1 if pedaling, 0 else
+    uint32_t       uint32_PAS_HIGH_counter;         // ?
+    uint32_t       uint32_PAS_HIGH_accumulated;     // ?
+    uint32_t       uint32_PAS_fraction;             // ?
+
+    // torque sensor data
+    uint16_t       uint16_torque_adc_offset;    
+    // 
+    uint8_t        uint8_torque_shift;
+    uint32_t       uint32_torque_adc_cumulated;     // cumulated torque in adc value (was uint32_torque_cumulated)
+    uint16_t       uint16_torque_adc;               //
+    uint32_t       uint32_torque_Nm_x10;            // torque value in Nm x 10
+
+
+} PedalData_t;
 
 
 typedef struct

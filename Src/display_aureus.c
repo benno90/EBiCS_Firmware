@@ -179,7 +179,7 @@ void Display_Service(MotorState_t *pMS)
         }
 
         // pas levels
-        pMS->ui8_assist_level = RxBuff[RX_BYTE(4)];
+        pMS->ui8_assist_level = (RxBuff[RX_BYTE(4)]) >> 3;  // max assist level: 256 >>> 3 = 32
     }
     else if (DisplayAureus_CheckSettingsMessage(ui8_bytes_received))
     {
