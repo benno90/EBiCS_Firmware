@@ -103,7 +103,8 @@ void display_update(MotorState_t* MS_U)
   else if (ui32_battery_volts > ((uint16_t) BATTERY_PACK_VOLTS_20)) { ui8_battery_soc = 4; } // 1 bar
   else { ui8_battery_soc = 3; } // empty
 
-  ui16_wheel_period_ms = (MS_U->Speed*PULSES_PER_REVOLUTION)>>3; //Speed Zähler wird mit 8kHz hochgezählt
+  //ui16_wheel_period_ms = (MS_U->Speed*PULSES_PER_REVOLUTION)>>3; //Speed Zähler wird mit 8kHz hochgezählt
+  ui16_wheel_period_ms = MS_U->ui16_wheel_time_ms;
   //ui16_wheel_period_ms= ((MS_U->Speed)*6*GEAR_RATIO/500); //*6 because 6 hall interrupts per revolution, /500 because of 500 kHz timer setting
   ui8_tx_buffer [0] =  65;
   // B1: battery level

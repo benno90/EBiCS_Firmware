@@ -149,16 +149,22 @@ typedef struct
     uint32_t       uint32_torque_adc_cumulated;     // cumulated torque in adc value (was uint32_torque_cumulated)
     uint16_t       uint16_torque_adc;               //
     uint32_t       uint32_torque_Nm_x10;            // torque value in Nm x 10
-
-
 } PedalData_t;
+
+typedef struct
+{   
+    uint32_t      uint32_external_SPEED_counter;   // was uint32_SPEED_counter  -> counting at 8kHz (see tim3)
+    uint32_t      uint32_SPEEDx100_kmh_cumulated;   // was uint32_SPEEDx100_cumulated
+    uint8_t       ui8_speed_shift;
+} WheelSpeedData_t;
+
 
 
 typedef struct
 {
 
 	//q31_t       	Voltage;   -> use BatteryVoltageData..
-	uint32_t       	Speed;
+	//uint32_t       	Speed; -> use ui16_wheel_time_ms
     uint16_t        ui16_wheel_time_ms;
     uint8_t         ui8_lights;
 	q31_t          	i_d;

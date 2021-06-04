@@ -103,7 +103,9 @@ void send_ant_page(uint8_t page, MotorState_t* MS, MotorParams_t* MP){
       State.Speed=RxAnt[10]<<8|RxAnt[9];
 	 */
 		 	 		uint8_t  temperature_state=1; //to do: set Temperature state Byte according to ANT+LEV
-		 	 		uint16_t speedx10 = MP->wheel_cirumference/((MS->Speed*MP->pulses_per_revolution)>>3)*36; // *3,6 for km/h then *10 for LEV standard definition.
+
+                    // benno: use MS->ui16_wheel_time_ms or copy kmh speed into MS..
+		 	 		//uint16_t speedx10 = MP->wheel_cirumference/((MS->Speed*MP->pulses_per_revolution)>>3)*36; // *3,6 for km/h then *10 for LEV standard definition.
 		 	 		//speedx10 = 250;
 
 		 	 		ui8_tx_buffer[3] = page;

@@ -112,12 +112,10 @@ int8_t i8_reverse_flag = 1; //for temporaribly reverse direction
 volatile uint8_t ui8_adc_offset_done_flag=0;
 volatile uint8_t ui8_Push_Assist_flag=0;
 volatile uint8_t ui8_PAS_flag=0;
-volatile uint8_t ui8_SPEED_flag=0;
+volatile uint8_t ui8_external_SPEED_control_flag=0;
 volatile uint8_t ui8_internal_SPEED_control_flag=0;
 volatile uint8_t ui8_BC_limit_flag=0;  //flag for Battery current limitation
 volatile uint8_t ui8_6step_flag=0;
-uint32_t uint32_SPEED_counter=32000;
-uint32_t uint32_SPEEDx100_cumulated=0;
 
 q31_t q31_rotorposition_PLL = 0;
 q31_t q31_pll_angle_per_tic = 0;
@@ -164,6 +162,7 @@ CurrentData_t CurrentData;
 BatteryVoltageData_t BatteryVoltageData;
 TemperatureData_t TemperatureData;
 PedalData_t PedalData;
+WheelSpeedData_t WheelSpeedData;
 
 //structs for PI_control
 PI_control_t PI_iq;   // todo: rename to PI_amplitude
@@ -173,11 +172,6 @@ PI_control_t PI_speed;
 // PI_control static variables
 static q31_t q31_i_d_cumulated = 0;             // angle control
 
-
-
-int16_t battery_percent_fromcapacity = 50; 			//Calculation of used watthours not implemented yet
-int16_t wheel_time = 1000;							//duration of one wheel rotation for speed calculation
-int16_t current_display;							//pepared battery current for display
 
 
 typedef enum {HALL_STATE_SIXSTEP = 0, HALL_STATE_EXTRAPOLATION = 1, HALL_STATE_PLL = 2} hall_angle_state_t;
@@ -351,7 +345,6 @@ int main(void)
 
     //initialize MS struct.
     MS.hall_angle_detect_flag = 1;
-    MS.Speed = 128000;
     MS.ui8_assist_level = 1;
     MS.regen_level = 7;
     MP.pulses_per_revolution = PULSES_PER_REVOLUTION;
@@ -384,6 +377,11 @@ int main(void)
     PedalData.uint8_torque_shift = 4;
     PedalData.uint32_torque_adc_cumulated = 0;
     PedalData.uint32_torque_Nm_x10 = 0;
+
+    //
+    WheelSpeedData.uint32_external_SPEED_counter = 32000;
+    WheelSpeedData.uint32_SPEEDx100_kmh_cumulated = 0;
+    WheelSpeedData.ui8_speed_shift = 1;
 
 
 //init PI structs
@@ -596,9 +594,6 @@ int main(void)
 	    //display message processing
 	    if(ui8_g_UART_Rx_flag)
         {
-		    // period [s] = tics x 6 x GEAR_RATIO / frequency    (frequency = 500kHz)
-            MS.ui16_wheel_time_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / (500);
-
             MS.q31_battery_current_mA = CurrentData.q31_battery_current_mA;
             MS.error_state = enum_motor_error_state; // todo -> move enum_motor_error_state into MS
 
@@ -679,33 +674,36 @@ int main(void)
         // --------------------------------------------------
         // SPEED signal processing
         //
-        // TODO: WheelSpeedData struct ..
-
-        if (ui8_SPEED_flag)
-        { // benno: this part seems to be for the external sensor
-
-            if (uint32_SPEED_counter > 200)
-            { //debounce
-                MS.Speed = uint32_SPEED_counter;
-                //HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-                uint32_SPEED_counter = 0;
-                ui8_SPEED_flag = 0;
 
 #if (SPEEDSOURCE == EXTERNAL)
-                uint32_SPEEDx100_cumulated -= uint32_SPEEDx100_cumulated >> SPEEDFILTER;
-                uint32_SPEEDx100_cumulated += external_tics_to_speedx100(MS.Speed);
-#endif
+        if (ui8_external_SPEED_control_flag)
+        {
+
+            if (WheelSpeedData.uint32_external_SPEED_counter > 200)
+            { //debounce
+                WheelSpeedData.uint32_SPEEDx100_kmh_cumulated -= WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> WheelSpeedData.ui8_speed_shift;
+                WheelSpeedData.uint32_SPEEDx100_kmh_cumulated += internal_tics_to_speedx100(WheelSpeedData.uint32_external_SPEED_COUNTER);
+
+                MS.ui16_wheel_time_ms = WheelSpeedData.uint32_external_SPEED_counter / (8 * PULSES_PER_REVOLUTION)
+                
+                WheelSpeedData.uint32_external_SPEED_counter = 0;
+                ui8_external_SPEED_control_flag = 0;
             }
         }
 
+#elif (SPEEDSOURCE == INTERNAL)
+
         if (ui8_internal_SPEED_control_flag)
         {
-#if (SPEEDSOURCE == INTERNAL)
-            uint32_SPEEDx100_cumulated -= uint32_SPEEDx100_cumulated >> SPEEDFILTER;
-            uint32_SPEEDx100_cumulated += internal_tics_to_speedx100(uint32_tics_filtered >> 3);
-#endif
+            WheelSpeedData.uint32_SPEEDx100_kmh_cumulated -= WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> WheelSpeedData.ui8_speed_shift;
+            WheelSpeedData.uint32_SPEEDx100_kmh_cumulated += internal_tics_to_speedx100(uint32_tics_filtered >> 3);
             ui8_internal_SPEED_control_flag = 0;
+		    
+            // period [s] = tics x 6 x GEAR_RATIO / frequency    (frequency = 500kHz)
+            MS.ui16_wheel_time_ms = (uint32_tics_filtered>>3) * 6 * GEAR_RATIO / (500);
         } // end speed processing
+
+#endif
 
         //------------------------------------------------------------------------------------------------------------
 
@@ -785,11 +783,10 @@ int main(void)
                 slow_loop_counter = 16;
             }
 
-            if (uint32_SPEED_counter > 127999)
+            if (WheelSpeedData.uint32_external_SPEED_counter > 127999)
             {
-                MS.Speed = 128000;
 #if (SPEEDSOURCE == EXTERNAL)
-                uint32_SPEEDx100_cumulated = 0;
+                WheelSpeedData.uint32_SPEEDx100_kmh_cumulated = 0;
 #endif
             }
 
@@ -1406,7 +1403,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
             }
 		}
 		//
-		if (uint32_SPEED_counter<128000)uint32_SPEED_counter++;					//counter for external Speedsensor
+		if (WheelSpeedData.uint32_external_SPEED_counter < 128000)
+        {
+            WheelSpeedData.uint32_external_SPEED_counter++;
+        }
 		if(uint16_full_rotation_counter<8000)uint16_full_rotation_counter++;	//full rotation counter for motor standstill detection
 		if(uint16_half_rotation_counter<8000)uint16_half_rotation_counter++;	//half rotation counter for motor standstill detection
 
@@ -1467,11 +1467,6 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 	//for oszi-check of used time in FOC procedere
 	//HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 	  ui32_tim1_counter++;
-
-	/*  else {
-	  HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-	  uint32_SPEED_counter=0;
-	  }*/
 
 	if(!ui8_adc_offset_done_flag)
 	{
@@ -1853,9 +1848,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	//Speed processing
 	if(GPIO_Pin == Speed_EXTI5_Pin)
 	{
-
-			ui8_SPEED_flag = 1; //with debounce
-
+        ui8_external_SPEED_control_flag = 1; //with debounce
 	}
 
 }
@@ -2177,27 +2170,31 @@ void get_standstill_position(){
         q31_rotorposition_absolute = q31_rotorposition_hall + (DEG_plus60 >> 1);
 }
 
-int32_t speed_to_tics (uint8_t speed){
-	return WHEEL_CIRCUMFERENCE*5*3600/(6*GEAR_RATIO*speed*10);
+int32_t speed_to_tics(uint8_t speed)
+{
+    return WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * speed * 10);
 }
 
-int8_t tics_to_speed (uint32_t tics){
-	return WHEEL_CIRCUMFERENCE*5*3600/(6*GEAR_RATIO*tics*10);;
+int8_t tics_to_speed(uint32_t tics)
+{
+    return WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * tics * 10);
 }
 
-int16_t internal_tics_to_speedx100 (uint32_t tics){
-	return WHEEL_CIRCUMFERENCE*50*3600/(6*GEAR_RATIO*tics);;
+int16_t internal_tics_to_speedx100(uint32_t tics)
+{
+    // returns the speed in kmh x 100
+    return WHEEL_CIRCUMFERENCE * 50 * 3600 / (6 * GEAR_RATIO * tics);
 }
 
-int16_t external_tics_to_speedx100 (uint32_t tics){
-	return WHEEL_CIRCUMFERENCE*8*360/(PULSES_PER_REVOLUTION*tics);;
+int16_t external_tics_to_speedx100(uint32_t tics)
+{
+    return WHEEL_CIRCUMFERENCE * 8 * 360 / (PULSES_PER_REVOLUTION * tics);
 }
 
 int16_t q31_degree_to_degree(q31_t q31_degree)
 {
     return ((q31_degree >> 23) * 180) >> 8;
 }
-
 
 static q31_t get_battery_power()
 {
@@ -2341,19 +2338,19 @@ static void limit_target_power(q31_t* target_power)
     // ---------------------------------------
     // limit velocity
 
-    uint16_t speed_x10 = (uint32_SPEEDx100_cumulated >> SPEEDFILTER) / 10;
+    uint16_t speed_kmh_x10 = (WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> WheelSpeedData.ui8_speed_shift) / 10;
     //uint16_t V2 = SPEEDLIMIT * 10 + 32;  // 482
     uint16_t V2 = SPEEDLIMIT * 10 + 16;   //  466
     uint16_t V1 = SPEEDLIMIT * 10;       // 450
 
-    if (speed_x10 > V2)
+    if (speed_kmh_x10 > V2)
     {
         *target_power = 0;
     }
-    else if(speed_x10 > V1)
+    else if(speed_kmh_x10 > V1)
     {
         //*target_power = *target_power * (V2 - speed_x10) / 32;
-        *target_power = *target_power * (V2 - speed_x10) / 16;
+        *target_power = *target_power * (V2 - speed_kmh_x10) / 16;
     }
 
     // ---------------------------------------

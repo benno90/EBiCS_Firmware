@@ -48,7 +48,7 @@
 #define THROTTLE_MAX 4000
 #define WHEEL_CIRCUMFERENCE 2234
 #define GEAR_RATIO 24
-#define SPEEDLIMIT 45
+#define SPEEDLIMIT 50
 #define PULSES_PER_REVOLUTION 1
 #define PH_CURRENT_MAX 400 //350          // in ampere x 10
 #define BATTERYCURRENT_MAX 180      // im ampere x 10
@@ -81,7 +81,6 @@
 #define EXTERNAL 1
 #define INTERNAL 0
 #define SPEEDSOURCE INTERNAL
-#define SPEEDFILTER 1
 
 #define SIXSTEPTHRESHOLD_UP 5586            // 5 kmh    
 #define SIXSTEPTHRESHOLD_DOWN 9310         // 3 kmh
