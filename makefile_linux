@@ -205,11 +205,11 @@ $(BUILD_DIR)/%.o: startup/%.s
 # clean up
 #######################################
 clean:
-ifeq ($(OS),Windows_NT)
-	rmdir /s /q $(BUILD_DIR)
-else
 	-rm -fR $(BUILD_DIR)
-endif
+#ifeq ($(OS),Windows_NT)
+#	rmdir /s /q $(BUILD_DIR)
+#else
+#endif
   
 #######################################
 # dependencies
