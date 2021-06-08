@@ -168,15 +168,17 @@ void Display_Service(MotorState_t *pMS)
         // process rx message
         //
 
-        // light
+        // light (bit 7)
         if (RxBuff[RX_BYTE(5)] & 0x80)
-        {
             pMS->ui8_lights = 1;
-        }
         else
-        {
             pMS->ui8_lights = 0;
-        }
+        
+        // walk assist (bit 4)
+        if (RxBuff[RX_BYTE(5)] & 0x10)
+            pMS->ui8_walk_assist = 1;
+        else
+            pMS->ui8_walk_assist = 0;
 
         // pas levels
         pMS->ui8_assist_level = (RxBuff[RX_BYTE(4)]) >> 3;  // max assist level: 256 >>> 3 = 32

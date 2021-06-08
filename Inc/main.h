@@ -171,6 +171,7 @@ typedef struct
 	//uint32_t       	Speed; -> use ui16_wheel_time_ms
     uint16_t        ui16_wheel_time_ms;
     uint8_t         ui8_lights;
+    uint8_t         ui8_walk_assist;
 	q31_t          	i_d;
 	q31_t          	i_q;
 	q31_t          	u_d;

@@ -2244,8 +2244,11 @@ static q31_t get_target_power()
     
     // --------------------------------------------------------
     // regular power control
-
-    if(PedalData.uint32_PAS < PAS_TIMEOUT)
+    if(MS.ui8_walk_assist)
+    {
+        return 1000;
+    }
+    else if(PedalData.uint32_PAS < PAS_TIMEOUT)
     {
 
 
@@ -2254,9 +2257,9 @@ static q31_t get_target_power()
         //return DA.Rx.AssistLevel * 10;
 
         uint32_t PAS_mod = PedalData.uint32_PAS;
-        if(PAS_mod > 660)
+        if(PAS_mod > 480)
         {
-            PAS_mod = 660;  // 33 rpm from the beginning!
+            PAS_mod = 480;  // 45 rpm from the beginning!
         }
 
 
@@ -2284,27 +2287,33 @@ static q31_t get_target_power()
 
 }
 
-static void limit_target_power(q31_t* target_power)
+static void limit_target_power(q31_t* p_q31_target_power_W_x10)
 {
     // ---------------------------------------
     // limit power
-    if(*target_power > 10000)
+    q31_t q31_max_power_W_x10 = 10000;
+    //if(MS.ui8_walk_assist)
+    //{
+    //    q31_max_power_W_x10 = 1000;
+    //}
+
+    if(*p_q31_target_power_W_x10 > q31_max_power_W_x10)
     {
-        *target_power = 10000;
+        *p_q31_target_power_W_x10 = q31_max_power_W_x10;
     }
 
-    if(*target_power < 0)
+    if(*p_q31_target_power_W_x10 < 0)
     {
-        *target_power = 0;
+        *p_q31_target_power_W_x10 = 0;
     }
 
     // ---------------------------------------
     // limit battery current
     // q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;  // battery voltage in mv
     q31_t limit_x10 = BatteryVoltageData.q31_battery_voltage_V_x10 * BATTERYCURRENT_MAX / 10;
-    if(*target_power > limit_x10)
+    if(*p_q31_target_power_W_x10 > limit_x10)
     {
-        *target_power = limit_x10;
+        *p_q31_target_power_W_x10 = limit_x10;
     }
     
     // ---------------------------------------
@@ -2319,9 +2328,9 @@ static void limit_target_power(q31_t* target_power)
     if(MS.u_q > 300)
     {
         // if u_q = 0 -> the limit is zero!
-        if(*target_power > limit_x10)
+        if(*p_q31_target_power_W_x10 > limit_x10)
         {
-            *target_power = limit_x10;
+            *p_q31_target_power_W_x10 = limit_x10;
         }
     }
     else
@@ -2334,18 +2343,25 @@ static void limit_target_power(q31_t* target_power)
     // limit velocity
 
     uint16_t speed_kmh_x10 = (WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> WheelSpeedData.ui8_speed_shift) / 10;
+
     //uint16_t V2 = SPEEDLIMIT * 10 + 32;  // 482
     uint16_t V2 = SPEEDLIMIT * 10 + 16;   //  466
     uint16_t V1 = SPEEDLIMIT * 10;       // 450
+    if(MS.ui8_walk_assist)
+    {
+        V2 = SPEEDLIMIT_WALK_ASSIST * 10 + 16;
+        V1 = SPEEDLIMIT_WALK_ASSIST * 10;
+    }    
+
 
     if (speed_kmh_x10 > V2)
     {
-        *target_power = 0;
+        *p_q31_target_power_W_x10 = 0;
     }
     else if(speed_kmh_x10 > V1)
     {
-        //*target_power = *target_power * (V2 - speed_x10) / 32;
-        *target_power = *target_power * (V2 - speed_kmh_x10) / 16;
+        //*p_q31_target_power_W_x10 = *p_q31_target_power_W_x10 * (V2 - speed_x10) / 32;
+        *p_q31_target_power_W_x10 = *p_q31_target_power_W_x10 * (V2 - speed_kmh_x10) / 16;
     }
 
     // ---------------------------------------
@@ -2359,9 +2375,9 @@ static void i_q_control()
 
     static uint32_t print_count = 0;
 
-    q31_t battery_power = get_battery_power();
-    q31_t target_power = get_target_power();
-    limit_target_power(&target_power);
+    q31_t q31_battery_power_W_x10 = get_battery_power();
+    q31_t q31_target_power_W_x10 = get_target_power();
+    limit_target_power(&q31_target_power_W_x10);
     //
     static q31_t u_q_temp = 0;
 
@@ -2389,7 +2405,7 @@ static void i_q_control()
         //
 
         // enable pwm if power is requested or velocity goes above a certain limit
-        if(target_power > 0  || (ui16_timertics < MOTOR_AUTO_ENABLE_THRESHOLD) )
+        if(q31_target_power_W_x10 > 0  || (ui16_timertics < MOTOR_AUTO_ENABLE_THRESHOLD) )
         {
             if(!enum_motor_error_state)
             {
@@ -2410,14 +2426,14 @@ static void i_q_control()
     {
         /* PI-CONTROL */
 
-        if(target_power < 200)
+        if(q31_target_power_W_x10 < 200)
         {
             // minimum of 20W assist, just to make sure the motor does not slow down the ride
-            target_power = 200;
+            //q31_target_power_W_x10 = 200;
         }
 
-        PI_iq.setpoint = target_power;
-        PI_iq.recent_value = battery_power;
+        PI_iq.setpoint = q31_target_power_W_x10;
+        PI_iq.recent_value = q31_battery_power_W_x10;
         u_q_temp = PI_control(&PI_iq);
 
 
@@ -2451,7 +2467,7 @@ static void i_q_control()
     //if(ui8_g_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
     //if(ui8_g_UART_TxCplt_flag && (print_count >= 200))
     //{
-        //sprintf_(buffer, "%u %d %d %d\n", i_q_control_state, u_q_temp, battery_power, target_power);
+        //sprintf_(buffer, "%u %d %d %d\n", i_q_control_state, u_q_temp, q31_battery_power_W_x10, q31_target_power_W_x10);
         //debug_print(buffer, strlen(buffer));
         //print_count = 0;
     //}
