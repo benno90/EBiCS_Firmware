@@ -105,8 +105,12 @@ void runPIcontrol();
 
 void UART_IdleItCallback(void);
 
-extern uint16_t switchtime[3];
-extern uint32_t ui32_tim1_counter;
+extern volatile uint16_t switchtime[3];
+extern volatile uint32_t ui32_tim1_counter;
+
+typedef enum {HALL_STATE_SIXSTEP = 0, HALL_STATE_EXTRAPOLATION = 1, HALL_STATE_PLL = 2} hall_angle_state_t;
+
+typedef enum {MOTOR_STATE_NORMAL = 0, MOTOR_STATE_BLOCKED = 1, MOTOR_STATE_PLL_ERROR = 2, MOTOR_STATE_HALL_ERROR = 3, MOTOR_STATE_DBG_ERROR = 10} motor_error_state_t;
 
 typedef struct
 {

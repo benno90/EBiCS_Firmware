@@ -77,7 +77,7 @@ DMA_HandleTypeDef hdma_usart1_rx;
 /* Private variables ---------------------------------------------------------*/
 
 
-uint32_t ui32_tim1_counter=0;
+volatile uint32_t ui32_tim1_counter=0;
 uint32_t ui32_tim3_counter=0;
 
 uint8_t ui8_hall_state=0;
@@ -92,67 +92,46 @@ uint16_t ui16_ph2_offset=0;
 uint16_t ui16_ph3_offset=0;
 uint16_t ui16_torque_offset = 0;
 int16_t i16_ph1_current=0;
-
 int16_t i16_ph2_current=0;
-int16_t i16_ph2_current_filter=0;
-int16_t i16_ph3_current=0;
-uint16_t i=0;
-uint16_t j=0;
-uint16_t k=0;
+
 static uint8_t ui8_slowloop_counter=0;
 volatile uint8_t ui8_adc_inj_flag=0;
 volatile uint8_t ui8_adc_regular_flag=0;
-uint8_t ui8_speedcase=0;
-uint8_t ui8_speedfactor=0;
 int8_t i8_direction= REVERSE; //for permanent reverse direction
 int8_t i8_reverse_flag = 1; //for temporaribly reverse direction
 
 volatile uint8_t ui8_adc_offset_done_flag=0;
-volatile uint8_t ui8_Push_Assist_flag=0;
 volatile uint8_t ui8_PAS_flag=0;
 volatile uint8_t ui8_external_SPEED_control_flag=0;
 volatile uint8_t ui8_internal_SPEED_control_flag=0;
-volatile uint8_t ui8_BC_limit_flag=0;  //flag for Battery current limitation
-volatile uint8_t ui8_6step_flag=0;
 
 q31_t q31_rotorposition_PLL = 0;
 q31_t q31_pll_angle_per_tic = 0;
 
-uint8_t ui8_UART_Counter=0;
 int8_t i8_recent_rotor_direction=1;
 int16_t i16_hall_order=1;
 
-uint16_t uint16_mapped_throttle=0;
-uint16_t uint16_mapped_PAS=0;
 uint16_t uint16_half_rotation_counter=0;
 uint16_t uint16_full_rotation_counter=0;
 
+static uint8_t ui8_pwm_enabled_flag = 0;
 
 q31_t q31_rotorposition_absolute;
 q31_t q31_rotorposition_hall;
 q31_t q31_rotorposition_motor_specific = SPEC_ANGLE;
-q31_t q31_u_d_temp=0;
-q31_t q31_u_q_temp=0;
-int16_t i16_sinus=0;
-int16_t i16_cosinus=0;
+
 char buffer[100];
 char char_dyn_adc_state_old=1;
 const uint8_t assist_factor[10]={0, 51, 102, 153, 204, 255, 255, 255, 255, 255};
 const uint8_t assist_profile[2][6]= {	{0,10,20,30,45,48},
 										{64,64,128,200,255,0}};
 
-uint16_t switchtime[3];
+volatile uint16_t switchtime[3];
 volatile uint16_t adcData[8]; //Buffer for ADC1 Input
-q31_t tic_array[6];
-
-
-//const uint32_t ui32_wheel_speed_tics_lower_limit  = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * SPEEDLIMIT * 10); //tics=wheelcirc*timerfrequency/(no. of hallevents per rev*gear-ratio*speedlimit)*3600/1000000
-//const uint32_t ui32_wheel_speed_tics_higher_limit = WHEEL_CIRCUMFERENCE * 5 * 3600 / (6 * GEAR_RATIO * (SPEEDLIMIT + 3) * 10);
 
 uint32_t uint32_tics_filtered = HALL_TIMEOUT << 3;
 
 uint16_t VirtAddVarTab[NB_OF_VAR] = {0x01, 0x02, 0x03};
-
 
 MotorState_t MS;
 MotorParams_t MP;
@@ -167,17 +146,11 @@ PI_control_t PI_iq;   // todo: rename to PI_amplitude
 PI_control_t PI_id;   // todo: rename to PI_angle
 PI_control_t PI_speed;
 //
-// PI_control static variables
-static q31_t q31_i_d_cumulated = 0;             // angle control
 
-
-
-typedef enum {HALL_STATE_SIXSTEP = 0, HALL_STATE_EXTRAPOLATION = 1, HALL_STATE_PLL = 2} hall_angle_state_t;
 static hall_angle_state_t enum_hall_angle_state = HALL_STATE_SIXSTEP;
 static uint8_t ui8_six_step_hall_count = 3;
 static uint8_t ui8_extrapolation_hall_count = 20;
 
-typedef enum {MOTOR_STATE_NORMAL = 0, MOTOR_STATE_BLOCKED = 1, MOTOR_STATE_PLL_ERROR = 2, MOTOR_STATE_HALL_ERROR = 3, MOTOR_STATE_DBG_ERROR = 10} motor_error_state_t;
 static motor_error_state_t enum_motor_error_state = MOTOR_STATE_NORMAL;
 static uint8_t ui8_motor_error_state_hall_count = 0;
 static uint16_t ui16_motor_init_state_timeout = 0;
@@ -207,6 +180,10 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
 
+static void enable_pwm();
+static void disable_pwm();
+static void trigger_motor_error(motor_error_state_t err);
+static void calibrate_adc_offset(void);
 static void process_pedal_data(void);
 static void process_wheel_speed_data(void);
 static void process_battery_voltage(void);
@@ -226,88 +203,6 @@ int16_t external_tics_to_speedx100 (uint32_t tics);
 int16_t q31_degree_to_degree(q31_t q31_degree);
 
 
-static uint8_t ui8_pwm_enabled_flag = 0;
-
-static void enable_pwm()
-{
-	uint16_half_rotation_counter=0;
-	uint16_full_rotation_counter=0;
-    //
-    uint32_t ui32_KV = 260000;
-    uint32_t u_q = ui32_KV * _T / (BatteryVoltageData.q31_battery_voltage_V_x10 * uint32_tics_filtered >> 3);
-    //u_q = u_q + 50;
-    //u_q = 0;
-
-    if(u_q > 1500)
-    {
-        u_q = 1500;
-    }
-
-    if(u_q < 200)
-    {
-        u_q = 0;
-    }
-
-    MS.u_q = u_q;
-    PI_iq.integral_part = (u_q << PI_iq.shift) / PI_iq.gain_i;
-    MS.u_d = 0;
-    PI_id.integral_part = 0;
-    //
-#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
-    sprintf_(buffer, "enable pwm, u_q = %lu\n", u_q);
-    debug_print((uint8_t* ) buffer, strlen(buffer));
-#endif
-
-    q31_rotorposition_absolute = q31_rotorposition_hall + (DEG_plus60 >> 1);
-    compute_switchtime(0, u_q, q31_rotorposition_absolute);
-    //
-	TIM1->CCR1 = switchtime[0]; //1023;
-	TIM1->CCR2 = switchtime[1]; //1023;
-	TIM1->CCR3 = switchtime[2]; //1023;
-    //
-    enum_hall_angle_state = HALL_STATE_SIXSTEP;
-    ui8_six_step_hall_count = 3;
-    ui8_pwm_enabled_flag = 1;
-    //
-	SET_BIT(TIM1->BDTR, TIM_BDTR_MOE);
-}
-
-static void disable_pwm()
-{
-   	CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE);
-    //uint32_tics_filtered=1000000; // set velocity to zero
-    enum_hall_angle_state = HALL_STATE_SIXSTEP;
-    ui8_six_step_hall_count = 3;
-    ui8_pwm_enabled_flag = 0;
-}
-
-static void trigger_motor_error(motor_error_state_t err)
-{
-    disable_pwm();
-    enum_motor_error_state = err;
-    ui8_motor_error_state_hall_count = 100;
-#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
-    switch(err)
-    {
-        case MOTOR_STATE_BLOCKED:
-            sprintf_(buffer, "\nERR: MOTOR_STATE_BLOCKED\n\n");
-            break;
-        case MOTOR_STATE_PLL_ERROR:
-            sprintf_(buffer, "\nERR: MOTOR_STATE_PLL_ERROR\n\n");
-            break;
-        case MOTOR_STATE_HALL_ERROR:
-            sprintf_(buffer, "\nERR: MOTOR_STATE_HALL_ERROR\n\n");
-            break;
-        case MOTOR_STATE_DBG_ERROR:
-            sprintf_(buffer, "\nERR: MOTOR_STATE_DBG_ERROR\n\n");
-            break;
-        default:
-            sprintf_(buffer, "\nERR: UNKNOWN\n");
-            break;        
-    }
-    debug_print2((uint8_t *) buffer, strlen(buffer));
-#endif
-}
 
 
 /* USER CODE END PFP */
@@ -358,7 +253,7 @@ int main(void)
 
     MS.ui8_dbg_log_value = 0;
     MS.ui16_dbg_value2 = 0;
-    MS.ui16_dbg_value = 0;
+    MS.ui16_dbg_value = 20;
     MS.ui8_go = 0;
     MS.ui8_log = 1;
 
@@ -491,43 +386,8 @@ int main(void)
 
     Display_Init(&MS);
 
-    TIM1->CCR1 = 1023; //set initial PWM values
-    TIM1->CCR2 = 1023;
-    TIM1->CCR3 = 1023;
 
-    CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE); //Disable PWM
-
-    HAL_Delay(200); //wait for stable conditions
-
-    BatteryVoltageData.q31_battery_voltage_adc_cumulated = 0;
-    TemperatureData.q31_temperature_adc_cumulated = 0;
-
-    for (i = 0; i < 32; i++)
-    {
-        while (!ui8_adc_regular_flag){}
-        ui16_ph1_offset += adcData[2];
-        ui16_ph2_offset += adcData[3];
-        ui16_ph3_offset += adcData[4];
-        ui16_torque_offset += adcData[TQ_ADC_INDEX];
-        BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
-        TemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
-        ui8_adc_regular_flag = 0;
-    }
-    ui16_ph1_offset = ui16_ph1_offset >> 5;
-    ui16_ph2_offset = ui16_ph2_offset >> 5;
-    ui16_ph3_offset = ui16_ph3_offset >> 5;
-    ui16_torque_offset = ui16_torque_offset >> 5;
-    ui16_torque_offset += 30; // hardcoded offset -> move to config.h
-
-    BatteryVoltageData.q31_battery_voltage_adc_cumulated =
-        (BatteryVoltageData.q31_battery_voltage_adc_cumulated >> 5) << BatteryVoltageData.ui8_shift;
-
-    BatteryVoltageData.q31_battery_voltage_V_x10 =
-        (BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> BatteryVoltageData.ui8_shift;
-
-    TemperatureData.q31_temperature_adc_cumulated =
-        (TemperatureData.q31_temperature_adc_cumulated >> 5) << TemperatureData.ui8_shift;
-    TemperatureData.q31_temperature_degrees = 0; // setting it in the slow loop
+    calibrate_adc_offset();
 
 // comment hochsitzcola 20.05.21
 #ifdef DISABLE_DYNAMIC_ADC               // set  injected channel with offsets
@@ -537,7 +397,6 @@ int main(void)
     ADC2->JOFR1 = ui16_ph2_offset;
 #endif
 
-    ui8_adc_offset_done_flag = 1;
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
     printf_("phase current offsets:  %d, %d, %d \n ", ui16_ph1_offset, ui16_ph2_offset, ui16_ph3_offset);
@@ -1153,6 +1012,133 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+static void enable_pwm()
+{
+	uint16_half_rotation_counter=0;
+	uint16_full_rotation_counter=0;
+    //
+    uint32_t ui32_KV = 260000;
+    uint32_t u_q = ui32_KV * _T / (BatteryVoltageData.q31_battery_voltage_V_x10 * uint32_tics_filtered >> 3);
+    //u_q = u_q + 50;
+    //u_q = 0;
+
+    if(u_q > 1500)
+    {
+        u_q = 1500;
+    }
+
+    if(u_q < 200)
+    {
+        u_q = 0;
+    }
+
+    MS.u_q = u_q;
+    PI_iq.integral_part = (u_q << PI_iq.shift) / PI_iq.gain_i;
+    MS.u_d = 0;
+    PI_id.integral_part = 0;
+    //
+#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
+    sprintf_(buffer, "enable pwm, u_q = %lu\n", u_q);
+    debug_print((uint8_t* ) buffer, strlen(buffer));
+#endif
+
+    q31_rotorposition_absolute = q31_rotorposition_hall + (DEG_plus60 >> 1);
+    compute_switchtime(0, u_q, q31_rotorposition_absolute);
+    //
+	TIM1->CCR1 = switchtime[0]; //1023;
+	TIM1->CCR2 = switchtime[1]; //1023;
+	TIM1->CCR3 = switchtime[2]; //1023;
+    //
+    enum_hall_angle_state = HALL_STATE_SIXSTEP;
+    ui8_six_step_hall_count = 3;
+    ui8_pwm_enabled_flag = 1;
+    //
+	SET_BIT(TIM1->BDTR, TIM_BDTR_MOE);
+}
+
+static void disable_pwm()
+{
+   	CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE);
+    //uint32_tics_filtered=1000000; // set velocity to zero
+    enum_hall_angle_state = HALL_STATE_SIXSTEP;
+    ui8_six_step_hall_count = 3;
+    ui8_pwm_enabled_flag = 0;
+}
+
+static void trigger_motor_error(motor_error_state_t err)
+{
+    disable_pwm();
+    enum_motor_error_state = err;
+    ui8_motor_error_state_hall_count = 100;
+#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
+    switch(err)
+    {
+        case MOTOR_STATE_BLOCKED:
+            sprintf_(buffer, "\nERR: MOTOR_STATE_BLOCKED\n\n");
+            break;
+        case MOTOR_STATE_PLL_ERROR:
+            sprintf_(buffer, "\nERR: MOTOR_STATE_PLL_ERROR\n\n");
+            break;
+        case MOTOR_STATE_HALL_ERROR:
+            sprintf_(buffer, "\nERR: MOTOR_STATE_HALL_ERROR\n\n");
+            break;
+        case MOTOR_STATE_DBG_ERROR:
+            sprintf_(buffer, "\nERR: MOTOR_STATE_DBG_ERROR\n\n");
+            break;
+        default:
+            sprintf_(buffer, "\nERR: UNKNOWN\n");
+            break;        
+    }
+    debug_print2((uint8_t *) buffer, strlen(buffer));
+#endif
+}
+
+
+static void calibrate_adc_offset(void)
+{
+    ui8_adc_offset_done_flag = 0;
+
+    TIM1->CCR1 = 1023; //set initial PWM values
+    TIM1->CCR2 = 1023;
+    TIM1->CCR3 = 1023;
+
+    CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE); //Disable PWM
+
+    HAL_Delay(200); //wait for stable conditions
+
+    BatteryVoltageData.q31_battery_voltage_adc_cumulated = 0;
+    TemperatureData.q31_temperature_adc_cumulated = 0;
+
+    for (uint8_t i = 0; i < 32; i++)
+    {
+        while (!ui8_adc_regular_flag){}
+        ui16_ph1_offset += adcData[2];
+        ui16_ph2_offset += adcData[3];
+        ui16_ph3_offset += adcData[4];
+        ui16_torque_offset += adcData[TQ_ADC_INDEX];
+        BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
+        TemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
+        ui8_adc_regular_flag = 0;
+    }
+    ui16_ph1_offset = ui16_ph1_offset >> 5;
+    ui16_ph2_offset = ui16_ph2_offset >> 5;
+    ui16_ph3_offset = ui16_ph3_offset >> 5;
+    ui16_torque_offset = ui16_torque_offset >> 5;
+    ui16_torque_offset += 30; // hardcoded offset -> move to config.h
+
+    BatteryVoltageData.q31_battery_voltage_adc_cumulated =
+        (BatteryVoltageData.q31_battery_voltage_adc_cumulated >> 5) << BatteryVoltageData.ui8_shift;
+
+    BatteryVoltageData.q31_battery_voltage_V_x10 =
+        (BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> BatteryVoltageData.ui8_shift;
+
+    TemperatureData.q31_temperature_adc_cumulated =
+        (TemperatureData.q31_temperature_adc_cumulated >> 5) << TemperatureData.ui8_shift;
+    TemperatureData.q31_temperature_degrees = 0; // setting it in the slow loop
+    
+    ui8_adc_offset_done_flag = 1;
+}
+
 static void process_pedal_data(void)
 {
     if (ui8_PAS_flag)
@@ -1489,24 +1475,22 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
 	//for oszi-check of used time in FOC procedere
 	//HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-	  ui32_tim1_counter++;
+	ui32_tim1_counter++;
 
 	if(!ui8_adc_offset_done_flag)
 	{
-	i16_ph1_current = HAL_ADCEx_InjectedGetValue(&hadc1, ADC_INJECTED_RANK_1);
-	i16_ph2_current = HAL_ADCEx_InjectedGetValue(&hadc2, ADC_INJECTED_RANK_1);
-
-	ui8_adc_inj_flag=1;
+	    i16_ph1_current = HAL_ADCEx_InjectedGetValue(&hadc1, ADC_INJECTED_RANK_1);
+	    i16_ph2_current = HAL_ADCEx_InjectedGetValue(&hadc2, ADC_INJECTED_RANK_1);
+	    ui8_adc_inj_flag=1;
 	}
-	else{
+	else
+    {
 
 #ifdef DISABLE_DYNAMIC_ADC
-
 		i16_ph1_current = HAL_ADCEx_InjectedGetValue(&hadc1, ADC_INJECTED_RANK_1);
 		i16_ph2_current = HAL_ADCEx_InjectedGetValue(&hadc2, ADC_INJECTED_RANK_1);
-
-
 #else
+
 	switch (MS.char_dyn_adc_state) //read in according to state
 		{
 		case 1: //Phase C at high dutycycles, read from A+B directly
@@ -1731,67 +1715,55 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         			q31_rotorposition_hall = DEG_plus120*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=1;
         			uint16_full_rotation_counter=0;
-        			tic_array[0]=ui16_timertics;
         			break;
         		case 45:
         			q31_rotorposition_hall = DEG_plus180*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=1;
-        			tic_array[1]=ui16_timertics;
         			break;
         		case 51:
         			q31_rotorposition_hall = DEG_minus120*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=1;
-        			tic_array[2]=ui16_timertics;
         			break;
         		case 13:
         			q31_rotorposition_hall = DEG_minus60*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=1;
         			uint16_half_rotation_counter=0;
-        			tic_array[3]=ui16_timertics;
         			break;
         		case 32:
         			q31_rotorposition_hall = DEG_0*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=1;
-        			tic_array[4]=ui16_timertics;
         			break;
         		case 26:
         			q31_rotorposition_hall = DEG_plus60*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=1;
-        			tic_array[5]=ui16_timertics;
         			break;
 
         		//6 cases for reverse direction
         		/*case 46:
         			q31_rotorposition_hall = DEG_plus120*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=-1;
-        			tic_array[0]=ui16_timertics;
         			break;
         		case 62:
         			q31_rotorposition_hall = DEG_plus60*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=-1;
-        			tic_array[1]=ui16_timertics;
         			break;
         		case 23:
         			q31_rotorposition_hall = DEG_0*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=-1;
         			uint16_half_rotation_counter=0;
-        			tic_array[2]=ui16_timertics;
         			break;
         		case 31:
         			q31_rotorposition_hall = DEG_minus60*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=-1;
-        			tic_array[3]=ui16_timertics;
         			break;
         		case 15:
         			q31_rotorposition_hall = DEG_minus120*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=-1;
-        			tic_array[4]=ui16_timertics;
         			break;
         		case 54:
         			q31_rotorposition_hall = DEG_plus180*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=-1;
         			uint16_full_rotation_counter=0;
-        			tic_array[5]=ui16_timertics;
         			break;*/
 
         		} // end case
@@ -2054,7 +2026,7 @@ void autodetect()
     enable_pwm();
     //
    	HAL_Delay(5);
-   	for(i = 0; i < 1080; i++)
+   	for(uint16_t i = 0; i < 1080; i++)
     {
    		q31_rotorposition_absolute += 11930465; //drive motor in open loop with steps of 1°
    		HAL_Delay(5);
@@ -2490,6 +2462,7 @@ static void i_q_control()
 // todo: rename this function to angle control
 static void i_d_control()
 {
+    static q31_t q31_i_d_cumulated = 0;             // angle control
     static uint8_t i_d_control_state = 0;       // idle
 
     static uint32_t print_count = 0;
