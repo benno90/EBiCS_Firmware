@@ -68,10 +68,11 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 
-
 UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_tx;
 DMA_HandleTypeDef hdma_usart1_rx;
+
+IWDG_HandleTypeDef hiwdg;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
@@ -172,6 +173,7 @@ static void MX_ADC1_Init(void);
 static void MX_ADC2_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_IWDG_Init(void);
 
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
@@ -433,6 +435,26 @@ int main(void)
     CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE); //Disable PWM
 
     get_standstill_position();
+    
+#ifdef ACTIVATE_WATCHDOG
+    if(__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST))
+    {
+#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
+        printf_("watchdog reset!\n");
+#endif
+        // do not continue here if reset from watchdog
+        while(1){}
+        //__HAL_RCC_CLEAR_RESET_FLAGS();
+    }
+    else
+    {
+#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
+        printf_("regular reset!\n");
+#endif
+    }
+    // start independent watchdog
+    MX_IWDG_Init();
+#endif
 
     /* USER CODE END 2 */
 
@@ -442,11 +464,12 @@ int main(void)
     {
 
 #if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
-        if (MS.ui16_dbg_value2)
-        {
-            trigger_motor_error(MOTOR_STATE_DBG_ERROR);
-            MS.ui16_dbg_value2 = 0;
-        }
+        // testing error triggering
+        //if (MS.ui16_dbg_value2)
+        //{
+        //    trigger_motor_error(MOTOR_STATE_DBG_ERROR);
+        //    MS.ui16_dbg_value2 = 0;
+        //}
 #endif
 
         // --------------------------------------------------
@@ -540,9 +563,10 @@ void SystemClock_Config(void)
 
     /**Initializes the CPU, AHB and APB busses clocks 
     */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_LSI; // LSI -> independent watchdog IWDG
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = 16;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI_DIV2;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL16;
@@ -1007,6 +1031,25 @@ static void MX_GPIO_Init(void)
 
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
+}
+
+/* IWDG init function */
+static void MX_IWDG_Init(void)
+{
+  // RM0008 - Table 96 IWDG timout period in seconds:
+  // (IWDG_PRESCALER) * (Period + 1) / f_LSI
+  // datasheet STM32F103x4 -> f_LSI = 40'000 Hz
+  // 
+  // 4 * 500 / 40000 = 0.05s
+  hiwdg.Instance = IWDG;
+  hiwdg.Init.Prescaler = IWDG_PRESCALER_4;
+  hiwdg.Init.Reload = 500;
+  // start the watchdog timer
+  if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
 
 }
 
@@ -2564,6 +2607,12 @@ static void i_d_control()
 
 void runPIcontrol()
 {
+    // feed the dog
+    if(MS.ui16_dbg_value2 == 0)   // for testing - remove later
+    {
+        HAL_IWDG_Refresh(&hiwdg);
+    }
+
     if(MS.hall_angle_detect_flag == 0)
     {
         return;
