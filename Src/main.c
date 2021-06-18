@@ -98,8 +98,6 @@ int16_t i16_ph2_current=0;
 static uint8_t ui8_slowloop_counter=0;
 volatile uint8_t ui8_adc_inj_flag=0;
 volatile uint8_t ui8_adc_regular_flag=0;
-int8_t i8_direction= REVERSE; //for permanent reverse direction
-int8_t i8_reverse_flag = 1; //for temporaribly reverse direction
 
 volatile uint8_t ui8_adc_offset_done_flag=0;
 volatile uint8_t ui8_PAS_flag=0;
@@ -1849,9 +1847,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
                 if(ui8_hall_error_count >= 3)
                 {
-                    if(!enum_motor_error_state)
+                    //if(!enum_motor_error_state)
+                    if(ui8_pwm_enabled_flag)
                     {
-                        // if the error state is not checked this error triggers all the time while pushing the bike backwards
+                        // only trigger the error when pwm is enabled
+                        // otherwise it can cause unnecessary delay of the motor power
                         trigger_motor_error(MOTOR_STATE_HALL_ERROR);
                     }
                 }
@@ -1862,6 +1862,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
                 if(ui8_hall_error_count == 1)
                 {
+                    // try to bridge a missed hall event
                     ui8_hall_state_old = next_expected_forward_hall_state[ui8_hall_state];
                 }
                 else
@@ -2066,7 +2067,10 @@ void autodetect()
     MS.u_q = 0;
     MS.u_d = 250;
     MS.foc_alpha = 0;
-    enable_pwm();
+	
+    //enable_pwm();
+    SET_BIT(TIM1->BDTR, TIM_BDTR_MOE);
+    ui8_pwm_enabled_flag = 1;
     //
    	HAL_Delay(5);
    	for(uint16_t i = 0; i < 1080; i++)
@@ -2169,7 +2173,7 @@ void autodetect()
 
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
-    printf_("Motor specific angle:  %d (q31_degree), %d (degree), direction %d \n ", q31_rotorposition_motor_specific, q31_degree_to_degree(q31_rotorposition_motor_specific), i16_hall_order);
+    printf_("Motor specific angle:  %d (q31_degree), %d (degree), hall_order %d \n ", q31_rotorposition_motor_specific, q31_degree_to_degree(q31_rotorposition_motor_specific), i16_hall_order);
 #endif
 
     HAL_Delay(5);
@@ -2469,10 +2473,10 @@ static void i_q_control()
     {
         /* PI-CONTROL */
 
-        if(q31_target_power_W_x10 < 200)
+        if(q31_target_power_W_x10 < 100) // && velocity > 15 oder 20 kmh? 
         {
             // minimum of 20W assist, just to make sure the motor does not slow down the ride
-            //q31_target_power_W_x10 = 200;
+            q31_target_power_W_x10 = 100;
         }
 
         PI_iq.setpoint = q31_target_power_W_x10;
@@ -2608,7 +2612,7 @@ static void i_d_control()
 void runPIcontrol()
 {
     // feed the dog
-    if(MS.ui16_dbg_value2 == 0)   // for testing - remove later
+    //if(MS.ui16_dbg_value2 == 0)   // trigger the watchdog
     {
         HAL_IWDG_Refresh(&hiwdg);
     }

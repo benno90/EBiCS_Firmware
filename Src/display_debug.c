@@ -118,9 +118,9 @@ void Display_Service(MotorState_t *pMS)
     {
         // parse value
         pMS->ui16_dbg_value = atoi((char *) &(TxBuff[2]));
-        if(pMS->ui16_dbg_value > 30)
+        if(pMS->ui16_dbg_value > 36)
         {
-            pMS->ui16_dbg_value = 30;
+            pMS->ui16_dbg_value = 36;
         }
         sprintf_((char *) TxBuff, "ui16_value = %u\n", pMS->ui16_dbg_value);
         debug_print2(TxBuff, strlen((char *) TxBuff));
