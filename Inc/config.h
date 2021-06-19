@@ -39,7 +39,7 @@
 #define BATTERY_LEVEL_4 368000
 #define BATTERY_LEVEL_5 380000
 #define P_FACTOR_I_Q 10 //500    // 0
-#define I_FACTOR_I_Q 2 //20     // 4
+#define I_FACTOR_I_Q 1 //20     // 4
 #define P_FACTOR_I_D 500 //500
 #define I_FACTOR_I_D 60
 #define P_FACTOR_SPEED 100
@@ -54,8 +54,13 @@
 #define SPEEDLIMIT 50
 #define SPEEDLIMIT_WALK_ASSIST 4
 #define PULSES_PER_REVOLUTION 1
-#define PH_CURRENT_MAX   500 //400 //350          // in ampere x 10
-#define BATTERYCURRENT_MAX 200 //180      // im ampere x 10
+#define MOTOR_POWER_MAX 10000        // in W x 10
+#define MOTOR_POWER_BOOST_DELTA 3500  // in W x 10
+#define PH_CURRENT_MAX 500          // in ampere x 10 (ac amplitude)
+#define PH_CURRENT_BOOST_DELTA 250    // in ampere x 10 (ac amplitude)
+#define BATTERYCURRENT_MAX 200      // im ampere x 10 (dc)
+#define BATTERYCURRENT_BOOST_DELTA 70      // im ampere x 10 (dc)
+#define BOOST_TIME 120  // in s x 10
 #define SPEC_ANGLE -167026406L //BionX IGH3 -143165476
 //#define DIRDET
 #define FRAC_HIGH 30
@@ -63,9 +68,9 @@
 #define TS_MODE
 #define TQ_ADC_INDEX 6  // AD1: 6, SP: 1
 #define TEMP_ADC_INDEX 5 // ADC_CHANNEL_TEMPSENSOR
-//#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
+#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
 //#define BLUETOOTH_SERIALIZE_DISPLAY
-#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
+//#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
 #define PUSHASSIST_CURRENT 30
 #define VOLTAGE_MIN 300
 #define REGEN_CURRENT 0

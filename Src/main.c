@@ -80,6 +80,7 @@ IWDG_HandleTypeDef hiwdg;
 
 volatile uint32_t ui32_tim1_counter=0;
 uint32_t ui32_tim3_counter=0;
+static uint16_t ui16_boost_counter = 0;
 
 uint8_t ui8_hall_state=0;
 uint8_t ui8_hall_state_old=0;
@@ -201,6 +202,8 @@ int8_t tics_to_speed (uint32_t tics);
 int16_t internal_tics_to_speedx100 (uint32_t tics);
 int16_t external_tics_to_speedx100 (uint32_t tics);
 int16_t q31_degree_to_degree(q31_t q31_degree);
+static q31_t get_battery_power();
+static q31_t get_target_power();
 
 
 
@@ -294,7 +297,7 @@ int main(void)
     PI_id.max_step_shifted = Q31_DEGREE << SHIFT_ID; // shifted value
     PI_id.shift = SHIFT_ID;
 
-#define SHIFT_IQ 10
+#define SHIFT_IQ 11
     PI_iq.gain_i = I_FACTOR_I_Q;
     PI_iq.gain_p = P_FACTOR_I_Q;
     PI_iq.setpoint = 0;
@@ -1362,7 +1365,15 @@ static void debug_comm(void)
             //sprintf_(buffer, "%lu %lu | %u %lu\n", u_q, MS.u_q, ui16_timertics, uint32_tics_filtered >> 3);
             //
             //sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, enum_motor_error_state, enum_hall_angle_state, ui8_motor_error_state_hall_count);
-            sprintf_(buffer, "%u %lu %lu\n", ui16_reg_adc_value, PedalData.uint32_torque_Nm_x10, PedalData.uint32_PAS);
+            //sprintf_(buffer, "%u %lu %lu\n", ui16_reg_adc_value, PedalData.uint32_torque_Nm_x10, PedalData.uint32_PAS);
+            sprintf_(buffer, "boost: %u\n", ui16_boost_counter);
+            {
+                //q31_t q31_battery_power_W_x10 = get_battery_power();
+                //q31_t q31_target_power_W_x10 = get_target_power();
+                //sprintf_(buffer, "%ld %ld\n", q31_target_power_W_x10, q31_battery_power_W_x10);
+                //q31_t phase_current_x10 = (CAL_I * MS.i_q) / (32 * 100);
+                //sprintf_(buffer, "%ld %ld\n", CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+            }
 //
 #endif
             break;
@@ -1440,6 +1451,8 @@ static void debug_comm(void)
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
+    static uint16_t tim3_prescaler = 0;
+
 	if(htim == &htim3) 
 	{
 		if(ui32_tim3_counter < 32000) ui32_tim3_counter++;
@@ -1460,6 +1473,16 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		if(uint16_full_rotation_counter<8000)uint16_full_rotation_counter++;	//full rotation counter for motor standstill detection
 		if(uint16_half_rotation_counter<8000)uint16_half_rotation_counter++;	//half rotation counter for motor standstill detection
 
+        ++tim3_prescaler;
+        if(tim3_prescaler == 800)
+        {
+            tim3_prescaler = 0;
+            // decrement boost counter at 10 Hz
+            if(ui16_boost_counter)
+            {
+                --ui16_boost_counter;
+            }
+        }
 	}
 
     if(htim == &htim2)
@@ -2336,9 +2359,31 @@ static q31_t get_target_power()
 
 static void limit_target_power(q31_t* p_q31_target_power_W_x10)
 {
+    static uint8_t ui8_was_idle = 1;
+
+    if(*p_q31_target_power_W_x10 == 0)
+    {
+        // nothing to limit
+        ui8_was_idle = 1;
+        return;
+    }
+    else if(ui8_was_idle)
+    {
+        // power requested
+        // trigger boost timeout
+        // todo: do not enable boost above certain chip temperature
+        //if(MS.ui16_dbg_value2)
+        {
+            ui16_boost_counter = BOOST_TIME;
+        }
+        ui8_was_idle = 0;
+    }
+
     // ---------------------------------------
     // limit power
-    q31_t q31_max_power_W_x10 = 10000;
+    q31_t q31_max_power_W_x10 = MOTOR_POWER_MAX + MOTOR_POWER_BOOST_DELTA * ui16_boost_counter / BOOST_TIME;
+    //q31_t q31_max_power_W_x10 = ui16_boost_counter ? MOTOR_POWER_BOOST_MAX : MOTOR_POWER_MAX;
+    //
     //if(MS.ui8_walk_assist)
     //{
     //    q31_max_power_W_x10 = 1000;
@@ -2357,7 +2402,9 @@ static void limit_target_power(q31_t* p_q31_target_power_W_x10)
     // ---------------------------------------
     // limit battery current
     // q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;  // battery voltage in mv
-    q31_t limit_x10 = BatteryVoltageData.q31_battery_voltage_V_x10 * BATTERYCURRENT_MAX / 10;
+    q31_t q31_batt_current_max_A_x10 = BATTERYCURRENT_MAX + BATTERYCURRENT_BOOST_DELTA * ui16_boost_counter / BOOST_TIME;
+    //q31_t q31_batt_current_max_A_x10 = ui16_boost_counter ? BATTERYCURRENT_BOOST_MAX : BATTERYCURRENT_MAX;
+    q31_t limit_x10 = BatteryVoltageData.q31_battery_voltage_V_x10 * q31_batt_current_max_A_x10 / 10;
     if(*p_q31_target_power_W_x10 > limit_x10)
     {
         *p_q31_target_power_W_x10 = limit_x10;
@@ -2369,8 +2416,11 @@ static void limit_target_power(q31_t* p_q31_target_power_W_x10)
     // assuming cos(phi) = 1 -> I_B = (3 / 4) * s * i_ph
     //
     // I_B_max = (3/4) * s * i_ph_max
+
+    q31_t q31_ph_current_max_A_x10 = PH_CURRENT_MAX + PH_CURRENT_BOOST_DELTA * ui16_boost_counter / BOOST_TIME;
+    //q31_t q31_ph_current_max_A_x10 = ui16_boost_counter ? PH_CURRENT_BOOST_MAX : PH_CURRENT_MAX;
         
-    q31_t bat_max_current_x10 = (3 * PH_CURRENT_MAX * MS.u_q) >> (11 + 2);
+    q31_t bat_max_current_x10 = (3 * q31_ph_current_max_A_x10 * MS.u_q) >> (_T_SHIFT + 2);
     limit_x10 = BatteryVoltageData.q31_battery_voltage_V_x10 * bat_max_current_x10 / 10;
     if(MS.u_q > 300)
     {
