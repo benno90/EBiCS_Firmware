@@ -112,11 +112,16 @@ typedef enum {HALL_STATE_SIXSTEP = 0, HALL_STATE_EXTRAPOLATION = 1, HALL_STATE_P
 
 typedef enum {MOTOR_STATE_NORMAL = 0, MOTOR_STATE_BLOCKED = 1, MOTOR_STATE_PLL_ERROR = 2, MOTOR_STATE_HALL_ERROR = 3, MOTOR_STATE_DBG_ERROR = 10} motor_error_state_t;
 
+typedef enum {VOLTAGE_STATE_NORMAL = 0, VOLTAGE_STATE_CRITICAL = 1, VOLTAGE_STATE_UNDER_VOLTAGE_ERROR = 2} voltage_state_t;
+
+typedef enum {TEMP_STATE_NOMRAL = 0, TEMP_STATE_CRITICAL = 1, TEMP_STATE_OVER_TEMP_ERROR = 2} temperature_state_t;
+
 typedef struct
 {
     q31_t           q31_battery_voltage_adc_cumulated;
     uint8_t         ui8_shift;
     q31_t           q31_battery_voltage_V_x10;
+    voltage_state_t enum_voltage_state;
 } BatteryVoltageData_t;
 
 typedef struct
@@ -124,6 +129,7 @@ typedef struct
     q31_t           q31_temperature_adc_cumulated;
     uint8_t         ui8_shift;
     q31_t           q31_temperature_degrees;
+    temperature_state_t enum_temperature_state;
 } TemperatureData_t;
 
 typedef struct
@@ -178,7 +184,7 @@ typedef struct
 	q31_t          	u_q;
     q31_t           foc_alpha;
 	q31_t          	u_abs;
-	q31_t          	q31_battery_current_mA;
+	//q31_t          	q31_battery_current_mA;
 	uint8_t 		hall_angle_detect_flag;
 	uint8_t 		char_dyn_adc_state;
 	uint8_t 		ui8_assist_level;
@@ -186,13 +192,23 @@ typedef struct
 	//uint32_t        Temperature;  -> use TemperatureData..
 	int8_t         	system_state;
 	int8_t         	gear_state;
-	int8_t         	error_state;
+	//int8_t         	error_state;
+    hall_angle_state_t enum_hall_angle_state;
+    motor_error_state_t enum_motor_error_state;
+
     //
     uint8_t         ui8_dbg_log_value;
     uint16_t        ui16_dbg_value;
     uint16_t        ui16_dbg_value2;
     uint8_t         ui8_go;
     uint8_t         ui8_log;
+
+    TemperatureData_t ChipTemperatureData;
+    TemperatureData_t MotorTemperatureData;
+    BatteryVoltageData_t BatteryVoltageData;
+    CurrentData_t CurrentData;
+    PedalData_t PedalData;
+    WheelSpeedData_t WheelSpeedData;
 
 }MotorState_t;
 

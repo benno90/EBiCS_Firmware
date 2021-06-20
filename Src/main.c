@@ -135,11 +135,6 @@ uint16_t VirtAddVarTab[NB_OF_VAR] = {0x01, 0x02, 0x03};
 
 MotorState_t MS;
 MotorParams_t MP;
-CurrentData_t CurrentData;
-BatteryVoltageData_t BatteryVoltageData;
-TemperatureData_t TemperatureData;
-PedalData_t PedalData;
-WheelSpeedData_t WheelSpeedData;
 
 //structs for PI_control
 PI_control_t PI_iq;   // todo: rename to PI_amplitude
@@ -147,11 +142,9 @@ PI_control_t PI_id;   // todo: rename to PI_angle
 PI_control_t PI_speed;
 //
 
-static hall_angle_state_t enum_hall_angle_state = HALL_STATE_SIXSTEP;
 static uint8_t ui8_six_step_hall_count = 3;
 static uint8_t ui8_extrapolation_hall_count = 20;
 
-static motor_error_state_t enum_motor_error_state = MOTOR_STATE_NORMAL;
 static uint8_t ui8_motor_error_state_hall_count = 0;
 static uint16_t ui16_motor_init_state_timeout = 0;
 
@@ -260,31 +253,32 @@ int main(void)
     MS.ui8_go = 0;
     MS.ui8_log = 1;
 
-    //
-    BatteryVoltageData.ui8_shift = 5;
-    TemperatureData.ui8_shift = 5;
-    CurrentData.ui8_battery_current_shift = 3;
-    CurrentData.q31_battery_current_mA = 0;
-    CurrentData.q31_battery_current_mA_cumulated = 0;
+    MS.enum_hall_angle_state = HALL_STATE_SIXSTEP;
+    MS.enum_motor_error_state = MOTOR_STATE_NORMAL;
 
     //
-    PedalData.uint8_pas_shift = 2;
-    PedalData.uint32_PAS_counter = PAS_TIMEOUT;
-    PedalData.uint32_PAS = PAS_TIMEOUT;
-    PedalData.uint32_PAS_raw = PAS_TIMEOUT;
-    PedalData.uint32_PAS_cumulated = PAS_TIMEOUT << PedalData.uint8_pas_shift;
-    PedalData.uint32_PAS_HIGH_counter = 0;
-    PedalData.uint32_PAS_HIGH_accumulated = 32000;
-    PedalData.uint32_PAS_fraction = 100;
+    MS.BatteryVoltageData.ui8_shift = 5;
+    MS.ChipTemperatureData.ui8_shift = 5;
+    MS.CurrentData.ui8_battery_current_shift = 3;
+    MS.CurrentData.q31_battery_current_mA = 0;
+    MS.CurrentData.q31_battery_current_mA_cumulated = 0;
     //
-    PedalData.uint8_torque_shift = 4;
-    PedalData.uint32_torque_adc_cumulated = 0;
-    PedalData.uint32_torque_Nm_x10 = 0;
-
+    MS.PedalData.uint8_pas_shift = 2;
+    MS.PedalData.uint32_PAS_counter = PAS_TIMEOUT;
+    MS.PedalData.uint32_PAS = PAS_TIMEOUT;
+    MS.PedalData.uint32_PAS_raw = PAS_TIMEOUT;
+    MS.PedalData.uint32_PAS_cumulated = PAS_TIMEOUT << MS.PedalData.uint8_pas_shift;
+    MS.PedalData.uint32_PAS_HIGH_counter = 0;
+    MS.PedalData.uint32_PAS_HIGH_accumulated = 32000;
+    MS.PedalData.uint32_PAS_fraction = 100;
     //
-    WheelSpeedData.uint32_external_SPEED_counter = 32000;
-    WheelSpeedData.uint32_SPEEDx100_kmh_cumulated = 0;
-    WheelSpeedData.ui8_speed_shift = 1;
+    MS.PedalData.uint8_torque_shift = 4;
+    MS.PedalData.uint32_torque_adc_cumulated = 0;
+    MS.PedalData.uint32_torque_Nm_x10 = 0;
+    //
+    MS.WheelSpeedData.uint32_external_SPEED_counter = 32000;
+    MS.WheelSpeedData.uint32_SPEEDx100_kmh_cumulated = 0;
+    MS.WheelSpeedData.ui8_speed_shift = 1;
 
 
 //init PI structs
@@ -490,9 +484,6 @@ int main(void)
         //display message processing
         if (ui8_g_UART_Rx_flag)
         {
-            MS.q31_battery_current_mA = CurrentData.q31_battery_current_mA;
-            MS.error_state = enum_motor_error_state; // todo -> move enum_motor_error_state into MS
-
             Display_Service(&MS);
 
             if (MS.ui8_lights)
@@ -1062,13 +1053,13 @@ static void enable_pwm()
 	uint16_full_rotation_counter=0;
     //
     uint32_t ui32_KV = 260000;
-    uint32_t u_q = ui32_KV * _T / (BatteryVoltageData.q31_battery_voltage_V_x10 * uint32_tics_filtered >> 3);
+    uint32_t u_q = ui32_KV * _T / (MS.BatteryVoltageData.q31_battery_voltage_V_x10 * uint32_tics_filtered >> 3);
     //u_q = u_q + 50;
     //u_q = 0;
 
-    if(u_q > 1500)
+    if(u_q > _U_MAX)
     {
-        u_q = 1500;
+        u_q = _U_MAX;
     }
 
     if(u_q < 200)
@@ -1093,7 +1084,7 @@ static void enable_pwm()
 	TIM1->CCR2 = switchtime[1]; //1023;
 	TIM1->CCR3 = switchtime[2]; //1023;
     //
-    enum_hall_angle_state = HALL_STATE_SIXSTEP;
+    MS.enum_hall_angle_state = HALL_STATE_SIXSTEP;
     ui8_six_step_hall_count = 3;
     ui8_pwm_enabled_flag = 1;
     //
@@ -1104,7 +1095,7 @@ static void disable_pwm()
 {
    	CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE);
     //uint32_tics_filtered=1000000; // set velocity to zero
-    enum_hall_angle_state = HALL_STATE_SIXSTEP;
+    MS.enum_hall_angle_state = HALL_STATE_SIXSTEP;
     ui8_six_step_hall_count = 3;
     ui8_pwm_enabled_flag = 0;
 }
@@ -1112,7 +1103,7 @@ static void disable_pwm()
 static void trigger_motor_error(motor_error_state_t err)
 {
     disable_pwm();
-    enum_motor_error_state = err;
+    MS.enum_motor_error_state = err;
     ui8_motor_error_state_hall_count = 100;
 #if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
     switch(err)
@@ -1150,8 +1141,8 @@ static void calibrate_adc_offset(void)
 
     HAL_Delay(200); //wait for stable conditions
 
-    BatteryVoltageData.q31_battery_voltage_adc_cumulated = 0;
-    TemperatureData.q31_temperature_adc_cumulated = 0;
+    MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated = 0;
+    MS.ChipTemperatureData.q31_temperature_adc_cumulated = 0;
 
     for (uint8_t i = 0; i < 32; i++)
     {
@@ -1160,8 +1151,8 @@ static void calibrate_adc_offset(void)
         ui16_ph2_offset += adcData[3];
         ui16_ph3_offset += adcData[4];
         ui16_torque_offset += adcData[TQ_ADC_INDEX];
-        BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
-        TemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
+        MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
+        MS.ChipTemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
         ui8_adc_regular_flag = 0;
     }
     ui16_ph1_offset = ui16_ph1_offset >> 5;
@@ -1170,15 +1161,15 @@ static void calibrate_adc_offset(void)
     ui16_torque_offset = ui16_torque_offset >> 5;
     ui16_torque_offset += 30; // hardcoded offset -> move to config.h
 
-    BatteryVoltageData.q31_battery_voltage_adc_cumulated =
-        (BatteryVoltageData.q31_battery_voltage_adc_cumulated >> 5) << BatteryVoltageData.ui8_shift;
+    MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated =
+        (MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated >> 5) << MS.BatteryVoltageData.ui8_shift;
 
-    BatteryVoltageData.q31_battery_voltage_V_x10 =
-        (BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> BatteryVoltageData.ui8_shift;
+    MS.BatteryVoltageData.q31_battery_voltage_V_x10 =
+        (MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> MS.BatteryVoltageData.ui8_shift;
 
-    TemperatureData.q31_temperature_adc_cumulated =
-        (TemperatureData.q31_temperature_adc_cumulated >> 5) << TemperatureData.ui8_shift;
-    TemperatureData.q31_temperature_degrees = 0; // setting it in the slow loop
+    MS.ChipTemperatureData.q31_temperature_adc_cumulated =
+        (MS.ChipTemperatureData.q31_temperature_adc_cumulated >> 5) << MS.ChipTemperatureData.ui8_shift;
+    MS.ChipTemperatureData.q31_temperature_degrees = 0; // setting it in the slow loop
     
     ui8_adc_offset_done_flag = 1;
 }
@@ -1187,56 +1178,56 @@ static void process_pedal_data(void)
 {
     if (ui8_PAS_flag)
     {
-        if (PedalData.uint32_PAS_counter > 100)  // debounce
+        if (MS.PedalData.uint32_PAS_counter > 100)  // debounce
         {
-            PedalData.uint32_PAS_cumulated -= PedalData.uint32_PAS_cumulated >> PedalData.uint8_pas_shift;
-            PedalData.uint32_PAS_cumulated += PedalData.uint32_PAS_counter;
-            PedalData.uint32_PAS = PedalData.uint32_PAS_cumulated >> PedalData.uint8_pas_shift;
-            PedalData.uint32_PAS_raw = PedalData.uint32_PAS_counter;
+            MS.PedalData.uint32_PAS_cumulated -= MS.PedalData.uint32_PAS_cumulated >> MS.PedalData.uint8_pas_shift;
+            MS.PedalData.uint32_PAS_cumulated += MS.PedalData.uint32_PAS_counter;
+            MS.PedalData.uint32_PAS = MS.PedalData.uint32_PAS_cumulated >> MS.PedalData.uint8_pas_shift;
+            MS.PedalData.uint32_PAS_raw = MS.PedalData.uint32_PAS_counter;
 
-            PedalData.uint32_PAS_HIGH_accumulated -= PedalData.uint32_PAS_HIGH_accumulated >> PedalData.uint8_pas_shift;
-            PedalData.uint32_PAS_HIGH_accumulated += PedalData.uint32_PAS_HIGH_counter;
+            MS.PedalData.uint32_PAS_HIGH_accumulated -= MS.PedalData.uint32_PAS_HIGH_accumulated >> MS.PedalData.uint8_pas_shift;
+            MS.PedalData.uint32_PAS_HIGH_accumulated += MS.PedalData.uint32_PAS_HIGH_counter;
 
-            PedalData.uint32_PAS_fraction = (PedalData.uint32_PAS_HIGH_accumulated >> PedalData.uint8_pas_shift) * 100 / PedalData.uint32_PAS;
-            PedalData.uint32_PAS_HIGH_counter = 0;
-            PedalData.uint32_PAS_counter = 0;
+            MS.PedalData.uint32_PAS_fraction = (MS.PedalData.uint32_PAS_HIGH_accumulated >> MS.PedalData.uint8_pas_shift) * 100 / MS.PedalData.uint32_PAS;
+            MS.PedalData.uint32_PAS_HIGH_counter = 0;
+            MS.PedalData.uint32_PAS_counter = 0;
             ui8_PAS_flag = 0;
 
 
-            uint32_t ui32_reg_adc_value_shifted = ui16_reg_adc_value << PedalData.uint8_torque_shift;
+            uint32_t ui32_reg_adc_value_shifted = ui16_reg_adc_value << MS.PedalData.uint8_torque_shift;
 
-            if (ui32_reg_adc_value_shifted > PedalData.uint32_torque_adc_cumulated)
+            if (ui32_reg_adc_value_shifted > MS.PedalData.uint32_torque_adc_cumulated)
             {
                 // accept rising values unfiltered
-                PedalData.uint32_torque_adc_cumulated = ui32_reg_adc_value_shifted;
+                MS.PedalData.uint32_torque_adc_cumulated = ui32_reg_adc_value_shifted;
             }
             else
             {
                 // filter falling values
-                PedalData.uint32_torque_adc_cumulated -= PedalData.uint32_torque_adc_cumulated >> PedalData.uint8_torque_shift;
-                PedalData.uint32_torque_adc_cumulated += ui16_reg_adc_value;
+                MS.PedalData.uint32_torque_adc_cumulated -= MS.PedalData.uint32_torque_adc_cumulated >> MS.PedalData.uint8_torque_shift;
+                MS.PedalData.uint32_torque_adc_cumulated += ui16_reg_adc_value;
             }
 
-            PedalData.uint32_torque_Nm_x10 = 10 * (PedalData.uint32_torque_adc_cumulated >> PedalData.uint8_torque_shift) / CAL_TORQUE;
+            MS.PedalData.uint32_torque_Nm_x10 = 10 * (MS.PedalData.uint32_torque_adc_cumulated >> MS.PedalData.uint8_torque_shift) / CAL_TORQUE;
         }
     }
 
-    if (PedalData.uint32_PAS_counter >= PAS_TIMEOUT)
+    if (MS.PedalData.uint32_PAS_counter >= PAS_TIMEOUT)
     {
-        PedalData.uint32_PAS = PAS_TIMEOUT;
-        PedalData.uint32_PAS_raw = PAS_TIMEOUT;
-        PedalData.uint32_PAS_cumulated = PAS_TIMEOUT << PedalData.uint8_pas_shift;
-        PedalData.uint32_torque_adc_cumulated = 0;
-        PedalData.uint32_torque_Nm_x10 = 0;
+        MS.PedalData.uint32_PAS = PAS_TIMEOUT;
+        MS.PedalData.uint32_PAS_raw = PAS_TIMEOUT;
+        MS.PedalData.uint32_PAS_cumulated = PAS_TIMEOUT << MS.PedalData.uint8_pas_shift;
+        MS.PedalData.uint32_torque_adc_cumulated = 0;
+        MS.PedalData.uint32_torque_Nm_x10 = 0;
     }
 
-    if (PedalData.uint32_PAS_raw >= PAS_TIMEOUT)
+    if (MS.PedalData.uint32_PAS_raw >= PAS_TIMEOUT)
     {
-        PedalData.uint8_pedaling = 0;
+        MS.PedalData.uint8_pedaling = 0;
     }
     else
     {
-        PedalData.uint8_pedaling = 1;
+        MS.PedalData.uint8_pedaling = 1;
     }
 }
 
@@ -1246,29 +1237,29 @@ static void process_wheel_speed_data(void)
     if (ui8_external_SPEED_control_flag)
     {
 
-        if (WheelSpeedData.uint32_external_SPEED_counter > 200)
+        if (MS.WheelSpeedData.uint32_external_SPEED_counter > 200)
         { //debounce
-            WheelSpeedData.uint32_SPEEDx100_kmh_cumulated -= WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> WheelSpeedData.ui8_speed_shift;
-            WheelSpeedData.uint32_SPEEDx100_kmh_cumulated += internal_tics_to_speedx100(WheelSpeedData.uint32_external_SPEED_COUNTER);
+            MS.WheelSpeedData.uint32_SPEEDx100_kmh_cumulated -= MS.WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> MS.WheelSpeedData.ui8_speed_shift;
+            MS.WheelSpeedData.uint32_SPEEDx100_kmh_cumulated += internal_tics_to_speedx100(MS.WheelSpeedData.uint32_external_SPEED_COUNTER);
 
-            MS.ui16_wheel_time_ms = WheelSpeedData.uint32_external_SPEED_counter * PULSES_PER_REVOLUTION / 8
+            MS.ui16_wheel_time_ms = MS.WheelSpeedData.uint32_external_SPEED_counter * PULSES_PER_REVOLUTION / 8
             
-            WheelSpeedData.uint32_external_SPEED_counter = 0;
+            MS.WheelSpeedData.uint32_external_SPEED_counter = 0;
             ui8_external_SPEED_control_flag = 0;
         }
     }
             
-    if (WheelSpeedData.uint32_external_SPEED_counter > 127999)
+    if (MS.WheelSpeedData.uint32_external_SPEED_counter > 127999)
     {
-        WheelSpeedData.uint32_SPEEDx100_kmh_cumulated = 0;
+        MS.WheelSpeedData.uint32_SPEEDx100_kmh_cumulated = 0;
     }
 
 #elif (SPEEDSOURCE == INTERNAL)
 
     if (ui8_internal_SPEED_control_flag)
     {
-        WheelSpeedData.uint32_SPEEDx100_kmh_cumulated -= WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> WheelSpeedData.ui8_speed_shift;
-        WheelSpeedData.uint32_SPEEDx100_kmh_cumulated += internal_tics_to_speedx100(uint32_tics_filtered >> 3);
+        MS.WheelSpeedData.uint32_SPEEDx100_kmh_cumulated -= MS.WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> MS.WheelSpeedData.ui8_speed_shift;
+        MS.WheelSpeedData.uint32_SPEEDx100_kmh_cumulated += internal_tics_to_speedx100(uint32_tics_filtered >> 3);
         ui8_internal_SPEED_control_flag = 0;
 		  
         // period [s] = tics x 6 x GEAR_RATIO / frequency    (frequency = 500kHz)
@@ -1280,16 +1271,16 @@ static void process_wheel_speed_data(void)
 
 static void process_battery_voltage(void)
 {
-    BatteryVoltageData.q31_battery_voltage_adc_cumulated -= (BatteryVoltageData.q31_battery_voltage_adc_cumulated >> BatteryVoltageData.ui8_shift);
-    BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
-    BatteryVoltageData.q31_battery_voltage_V_x10 =
-        (BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> BatteryVoltageData.ui8_shift;
+    MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated -= (MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated >> MS.BatteryVoltageData.ui8_shift);
+    MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
+    MS.BatteryVoltageData.q31_battery_voltage_V_x10 =
+        (MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> MS.BatteryVoltageData.ui8_shift;
 }
 
 static void process_chip_temperature(void)
 {
-    TemperatureData.q31_temperature_adc_cumulated -= (TemperatureData.q31_temperature_adc_cumulated >> TemperatureData.ui8_shift);
-    TemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
+    MS.ChipTemperatureData.q31_temperature_adc_cumulated -= (MS.ChipTemperatureData.q31_temperature_adc_cumulated >> MS.ChipTemperatureData.ui8_shift);
+    MS.ChipTemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
 
     // data sheet STM32F103x4
     // 5.3.19 Temperature sensor characteristics
@@ -1298,16 +1289,16 @@ static void process_chip_temperature(void)
 
     // recover voltage (3.3V  ref voltage, 2^12 = 4096)
     // int32_t v_temp = adcData[TEMP_ADC_INDEX] * 3300 >> 12; // voltage in mV
-    int32_t v_temp = (TemperatureData.q31_temperature_adc_cumulated >> TemperatureData.ui8_shift) * 3300 >> 12; // voltage in mV
+    int32_t v_temp = (MS.ChipTemperatureData.q31_temperature_adc_cumulated >> MS.ChipTemperatureData.ui8_shift) * 3300 >> 12; // voltage in mV
     //
     v_temp = (1430 - v_temp) * 10 / 43 + 25;
     if (v_temp > 0)
     {
-        TemperatureData.q31_temperature_degrees = v_temp;
+        MS.ChipTemperatureData.q31_temperature_degrees = v_temp;
     }
     else
     {
-        TemperatureData.q31_temperature_degrees = 0;
+        MS.ChipTemperatureData.q31_temperature_degrees = 0;
     }
 
 }
@@ -1356,23 +1347,23 @@ static void debug_comm(void)
         case 0:
 #ifndef BLUETOOTH_SERIALIZE_DISPLAY
             // plot anything here
-            //sprintf_(buffer, "%u %u T: %u  U: %u\n", enum_motor_error_state, ui8_six_step_hall_count, (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
-            //uint32_t ui32_KV = ((ui16_timertics * BatteryVoltageData.q31_battery_voltage_V_x10) >> 11) * MS.u_q;
+            //sprintf_(buffer, "%u %u T: %u  U: %u\n", MS.enum_motor_error_state, ui8_six_step_hall_count, (uint16_t)MS.ChipTemperatureData.q31_temperature_degrees, (uint16_t)(MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+            //uint32_t ui32_KV = ((ui16_timertics * MS.BatteryVoltageData.q31_battery_voltage_V_x10) >> 11) * MS.u_q;
             //sprintf_(buffer, "kv: %lu\n", ui32_KV);
             //
             //uint32_t ui32_KV = 260000;
-            //uint32_t u_q = ui32_KV * _T / (BatteryVoltageData.q31_battery_voltage_V_x10 * ui16_timertics);
+            //uint32_t u_q = ui32_KV * _T / (MS.BatteryVoltageData.q31_battery_voltage_V_x10 * ui16_timertics);
             //sprintf_(buffer, "%lu %lu | %u %lu\n", u_q, MS.u_q, ui16_timertics, uint32_tics_filtered >> 3);
             //
-            //sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, enum_motor_error_state, enum_hall_angle_state, ui8_motor_error_state_hall_count);
-            //sprintf_(buffer, "%u %lu %lu\n", ui16_reg_adc_value, PedalData.uint32_torque_Nm_x10, PedalData.uint32_PAS);
+            //sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, MS.enum_motor_error_state, MS.enum_hall_angle_state, ui8_motor_error_state_hall_count);
+            //sprintf_(buffer, "%u %lu %lu\n", ui16_reg_adc_value, MS.PedalData.uint32_torque_Nm_x10, MS.PedalData.uint32_PAS);
             sprintf_(buffer, "boost: %u\n", ui16_boost_counter);
             {
                 //q31_t q31_battery_power_W_x10 = get_battery_power();
                 //q31_t q31_target_power_W_x10 = get_target_power();
                 //sprintf_(buffer, "%ld %ld\n", q31_target_power_W_x10, q31_battery_power_W_x10);
                 //q31_t phase_current_x10 = (CAL_I * MS.i_q) / (32 * 100);
-                //sprintf_(buffer, "%ld %ld\n", CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+                //sprintf_(buffer, "%ld %ld\n", MS.CurrentData.q31_battery_current_mA / 100, phase_current_x10);
             }
 //
 #endif
@@ -1383,15 +1374,15 @@ static void debug_comm(void)
 #ifdef BLUETOOTH_SERIALIZE_DISPLAY
             sprintf_(buffer, "Graph:%u$", velocity_kmh);
 #else
-            sprintf_(buffer, "v_kmh: %u\n", velocity_kmh);
+            sprintf_(buffer, "v_kmh: %u (u_q: %ld)\n", velocity_kmh, MS.u_q);
 #endif
             break;
         }
         case 2:
 #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-            sprintf_(buffer, "Graph:%u|%u$", (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+            sprintf_(buffer, "Graph:%u|%u$", (uint16_t)MS.ChipTemperatureData.q31_temperature_degrees, (uint16_t)(MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
 #else
-            sprintf_(buffer, "T: %u | U: %u\n", (uint16_t)TemperatureData.q31_temperature_degrees, (uint16_t)(BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+            sprintf_(buffer, "T: %u | U: %u\n", (uint16_t)MS.ChipTemperatureData.q31_temperature_degrees, (uint16_t)(MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
 #endif
             break;
         case 3:
@@ -1410,13 +1401,13 @@ static void debug_comm(void)
             break;
         case 5:
         {
-            //uint32_t phase_current_x10 = CurrentData.q31_battery_current_mA / 100;
+            //uint32_t phase_current_x10 = MS.CurrentData.q31_battery_current_mA / 100;
             //phase_current_x10 = phase_current_x10 * 4 * _T / (3 * MS.u_q);
             q31_t phase_current_x10 = (CAL_I * MS.i_q) / (32 * 100);
 #ifdef BLUETOOTH_SERIALIZE_DISPLAY
-            sprintf_(buffer, "Graph:%ld|%ld$", CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+            sprintf_(buffer, "Graph:%ld|%ld$", MS.CurrentData.q31_battery_current_mA / 100, phase_current_x10);
 #else
-            sprintf_(buffer, "cur: %ld | ph_cur: %ld (A x10)\n", CurrentData.q31_battery_current_mA / 100, phase_current_x10);
+            sprintf_(buffer, "Ib: %ld | Iph: %ld | u_q: %ld\n", MS.CurrentData.q31_battery_current_mA / 100, phase_current_x10, MS.u_q);
 #endif
             break;
         }
@@ -1424,7 +1415,7 @@ static void debug_comm(void)
 #ifdef BLUETOOTH_SERIALIZE_DISPLAY
             sprintf_(buffer, "Graph:%ld|%ld$", MS.i_q, MS.i_d);
 #else
-            sprintf_(buffer, "i_q: %ld | i_d: %ld\n", MS.i_q, MS.i_d);
+            sprintf_(buffer, "i_q: %ld | i_d: %ld | u_q: %ld\n", MS.i_q, MS.i_d, MS.u_q);
 #endif
             break;
         default:
@@ -1457,18 +1448,18 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	{
 		if(ui32_tim3_counter < 32000) ui32_tim3_counter++;
 		//
-		if(PedalData.uint32_PAS_counter < PAS_TIMEOUT)
+		if(MS.PedalData.uint32_PAS_counter < PAS_TIMEOUT)
 		{
-			PedalData.uint32_PAS_counter++;
+			MS.PedalData.uint32_PAS_counter++;
 			if(HAL_GPIO_ReadPin(PAS_GPIO_Port, PAS_Pin)) 
             {
-                PedalData.uint32_PAS_HIGH_counter++;
+                MS.PedalData.uint32_PAS_HIGH_counter++;
             }
 		}
 		//
-		if (WheelSpeedData.uint32_external_SPEED_counter < 128000)
+		if (MS.WheelSpeedData.uint32_external_SPEED_counter < 128000)
         {
-            WheelSpeedData.uint32_external_SPEED_counter++;
+            MS.WheelSpeedData.uint32_external_SPEED_counter++;
         }
 		if(uint16_full_rotation_counter<8000)uint16_full_rotation_counter++;	//full rotation counter for motor standstill detection
 		if(uint16_half_rotation_counter<8000)uint16_half_rotation_counter++;	//half rotation counter for motor standstill detection
@@ -1616,7 +1607,7 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
             trigger_motor_error(MOTOR_STATE_BLOCKED);
         }
 
-        switch(enum_hall_angle_state)
+        switch(MS.enum_hall_angle_state)
         {
             case HALL_STATE_SIXSTEP:
                 q31_rotorposition_absolute = q31_rotorposition_hall + (DEG_plus60 >> 1);
@@ -1630,7 +1621,7 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 	        
                 if(ui16_timertics < SIXSTEPTHRESHOLD_UP && ui8_six_step_hall_count == 0)
                 {
-                    enum_hall_angle_state = HALL_STATE_EXTRAPOLATION;
+                    MS.enum_hall_angle_state = HALL_STATE_EXTRAPOLATION;
                 }
                 break;
 
@@ -1645,14 +1636,14 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
                 if(ui16_timertics > SIXSTEPTHRESHOLD_DOWN)
                 {
                     ui8_six_step_hall_count = 3;
-                    enum_hall_angle_state = HALL_STATE_SIXSTEP;
+                    MS.enum_hall_angle_state = HALL_STATE_SIXSTEP;
                 }
 
                 if(ui8_extrapolation_hall_count == 0)
                 {
                     if(q31_pll_abs_delta < Q31_DEGREE * 10)
                     {
-                        enum_hall_angle_state = HALL_STATE_PLL;
+                        MS.enum_hall_angle_state = HALL_STATE_PLL;
                     }
                     else
                     {
@@ -1671,7 +1662,7 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
                 if(ui16_timertics > SIXSTEPTHRESHOLD_DOWN)
                 {
                     ui8_six_step_hall_count = 3;
-                    enum_hall_angle_state = HALL_STATE_SIXSTEP;
+                    MS.enum_hall_angle_state = HALL_STATE_SIXSTEP;
                 }
                 break;
 
@@ -1769,7 +1760,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
                     // clear motor error after a certain amount of valid hall transitions
                     if(ui8_motor_error_state_hall_count > 0) -- ui8_motor_error_state_hall_count;
-                    if(ui8_motor_error_state_hall_count == 0) enum_motor_error_state = MOTOR_STATE_NORMAL;
+                    if(ui8_motor_error_state_hall_count == 0) MS.enum_motor_error_state = MOTOR_STATE_NORMAL;
             	}
 
             	switch (ui8_hall_case) //12 cases for each transition from one stage to the next. 6x forward, 6x reverse
@@ -1833,7 +1824,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         		} // end case
 
 #ifdef SPEED_PLL
-                if(enum_hall_angle_state != HALL_STATE_SIXSTEP)
+                if(MS.enum_hall_angle_state != HALL_STATE_SIXSTEP)
                 {
         		    q31_pll_angle_per_tic = speed_PLL(q31_rotorposition_PLL, q31_rotorposition_hall);
                 }
@@ -1870,7 +1861,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
                 if(ui8_hall_error_count >= 3)
                 {
-                    //if(!enum_motor_error_state)
+                    //if(!MS.enum_motor_error_state)
                     if(ui8_pwm_enabled_flag)
                     {
                         // only trigger the error when pwm is enabled
@@ -2281,15 +2272,15 @@ static q31_t get_battery_power()
     q31_t battery_current_mA = CAL_I * ((MS.i_q * MS.u_q) >> 11);           // battery current in mA x 32 (foc_counter)
     battery_current_mA = (battery_current_mA * 3) >> (5 + 2);               // battery current in mA   /   >> 5 because of sampling (32), >> 2 factor 3/4
     //
-    CurrentData.q31_battery_current_mA_cumulated -= CurrentData.q31_battery_current_mA_cumulated >> CurrentData.ui8_battery_current_shift;
-    CurrentData.q31_battery_current_mA_cumulated += battery_current_mA;
-    battery_current_mA = CurrentData.q31_battery_current_mA_cumulated >> CurrentData.ui8_battery_current_shift;  // battery current in mA   // filtered
-    CurrentData.q31_battery_current_mA = battery_current_mA;
+    MS.CurrentData.q31_battery_current_mA_cumulated -= MS.CurrentData.q31_battery_current_mA_cumulated >> MS.CurrentData.ui8_battery_current_shift;
+    MS.CurrentData.q31_battery_current_mA_cumulated += battery_current_mA;
+    battery_current_mA = MS.CurrentData.q31_battery_current_mA_cumulated >> MS.CurrentData.ui8_battery_current_shift;  // battery current in mA   // filtered
+    MS.CurrentData.q31_battery_current_mA = battery_current_mA;
     
     //q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;   // battery voltage in mV
 
     // battery power in W x 10
-    q31_t battery_power_x10 = (battery_current_mA * BatteryVoltageData.q31_battery_voltage_V_x10) / 1000;
+    q31_t battery_power_x10 = (battery_current_mA * MS.BatteryVoltageData.q31_battery_voltage_V_x10) / 1000;
 
     return battery_power_x10;
 }
@@ -2318,7 +2309,7 @@ static q31_t get_target_power()
     {
         return 1000;
     }
-    else if(PedalData.uint32_PAS < PAS_TIMEOUT)
+    else if(MS.PedalData.uint32_PAS < PAS_TIMEOUT)
     {
 
 
@@ -2326,7 +2317,7 @@ static q31_t get_target_power()
 
         //return DA.Rx.AssistLevel * 10;
 
-        uint32_t PAS_mod = PedalData.uint32_PAS;
+        uint32_t PAS_mod = MS.PedalData.uint32_PAS;
         if(PAS_mod > 480)
         {
             PAS_mod = 480;  // 45 rpm from the beginning!
@@ -2347,7 +2338,7 @@ static q31_t get_target_power()
         //uint32_t pas_omega_x10 = (2285 * (1.0)) / PAS_mod;                // including the assistfactor x10
     	//uint16_t torque_nm = ui16_reg_adc_value >> 4; // very rough estimate, todo verify again
     	//uint16_t torque_nm = (uint32_torque_cumulated >> 4) >> 4;
-    	q31_t pedal_power_x10 = (pas_omega_x10 * PedalData.uint32_torque_Nm_x10) / 10;
+    	q31_t pedal_power_x10 = (pas_omega_x10 * MS.PedalData.uint32_torque_Nm_x10) / 10;
         return pedal_power_x10;
     }
     else
@@ -2360,6 +2351,8 @@ static q31_t get_target_power()
 static void limit_target_power(q31_t* p_q31_target_power_W_x10)
 {
     static uint8_t ui8_was_idle = 1;
+    
+    uint16_t speed_kmh_x10 = (MS.WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> MS.WheelSpeedData.ui8_speed_shift) / 10;
 
     if(*p_q31_target_power_W_x10 == 0)
     {
@@ -2371,9 +2364,10 @@ static void limit_target_power(q31_t* p_q31_target_power_W_x10)
     {
         // power requested
         // trigger boost timeout
-        // todo: do not enable boost above certain chip temperature
         //if(MS.ui16_dbg_value2)
+        if(speed_kmh_x10 < 200)
         {
+            // todo: do not enable boost above certain chip temperature
             ui16_boost_counter = BOOST_TIME;
         }
         ui8_was_idle = 0;
@@ -2404,7 +2398,7 @@ static void limit_target_power(q31_t* p_q31_target_power_W_x10)
     // q31_t battery_voltage = (MS.Voltage * CAL_BAT_V) >> 5;  // battery voltage in mv
     q31_t q31_batt_current_max_A_x10 = BATTERYCURRENT_MAX + BATTERYCURRENT_BOOST_DELTA * ui16_boost_counter / BOOST_TIME;
     //q31_t q31_batt_current_max_A_x10 = ui16_boost_counter ? BATTERYCURRENT_BOOST_MAX : BATTERYCURRENT_MAX;
-    q31_t limit_x10 = BatteryVoltageData.q31_battery_voltage_V_x10 * q31_batt_current_max_A_x10 / 10;
+    q31_t limit_x10 = MS.BatteryVoltageData.q31_battery_voltage_V_x10 * q31_batt_current_max_A_x10 / 10;
     if(*p_q31_target_power_W_x10 > limit_x10)
     {
         *p_q31_target_power_W_x10 = limit_x10;
@@ -2421,7 +2415,7 @@ static void limit_target_power(q31_t* p_q31_target_power_W_x10)
     //q31_t q31_ph_current_max_A_x10 = ui16_boost_counter ? PH_CURRENT_BOOST_MAX : PH_CURRENT_MAX;
         
     q31_t bat_max_current_x10 = (3 * q31_ph_current_max_A_x10 * MS.u_q) >> (_T_SHIFT + 2);
-    limit_x10 = BatteryVoltageData.q31_battery_voltage_V_x10 * bat_max_current_x10 / 10;
+    limit_x10 = MS.BatteryVoltageData.q31_battery_voltage_V_x10 * bat_max_current_x10 / 10;
     if(MS.u_q > 300)
     {
         // if u_q = 0 -> the limit is zero!
@@ -2439,7 +2433,6 @@ static void limit_target_power(q31_t* p_q31_target_power_W_x10)
     // ---------------------------------------
     // limit velocity
 
-    uint16_t speed_kmh_x10 = (WheelSpeedData.uint32_SPEEDx100_kmh_cumulated >> WheelSpeedData.ui8_speed_shift) / 10;
 
     //uint16_t V2 = SPEEDLIMIT * 10 + 32;  // 482
     uint16_t V2 = SPEEDLIMIT * 10 + 16;   //  466
@@ -2454,6 +2447,7 @@ static void limit_target_power(q31_t* p_q31_target_power_W_x10)
     if (speed_kmh_x10 > V2)
     {
         *p_q31_target_power_W_x10 = 0;
+        // trigger over speed error and disable pwm ?
     }
     else if(speed_kmh_x10 > V1)
     {
@@ -2463,6 +2457,11 @@ static void limit_target_power(q31_t* p_q31_target_power_W_x10)
 
     // ---------------------------------------
     // todo: limit temperature
+
+
+    // ---------------------------------------
+    // todo: low voltage protection
+
 }
 
 // todo rename this function to amplitude control
@@ -2478,7 +2477,7 @@ static void i_q_control()
     //
     static q31_t u_q_temp = 0;
 
-    if(enum_motor_error_state)
+    if(MS.enum_motor_error_state)
     {
         i_q_control_state = 0;
     }
@@ -2490,8 +2489,8 @@ static void i_q_control()
         u_q_temp = 0;
 
         PI_iq.integral_part = 0;
-        CurrentData.q31_battery_current_mA_cumulated = 0;
-        CurrentData.q31_battery_current_mA = 0;
+        MS.CurrentData.q31_battery_current_mA_cumulated = 0;
+        MS.CurrentData.q31_battery_current_mA = 0;
         MS.i_q = 0;
         MS.i_d = 0;
 
@@ -2504,7 +2503,7 @@ static void i_q_control()
         // enable pwm if power is requested or velocity goes above a certain limit
         if(q31_target_power_W_x10 > 0  || (ui16_timertics < MOTOR_AUTO_ENABLE_THRESHOLD) )
         {
-            if(!enum_motor_error_state)
+            if(!MS.enum_motor_error_state)
             {
                 if(ui16_timertics > (MOTOR_ENABLE_THRESHOLD))      // do not enable pwm above a ceratin limit velocity
                 {
@@ -2590,7 +2589,7 @@ static void i_d_control()
     q31_t alpha_temp = 0;
     //alpha_temp = q31_degree * DD.ui16_value2;
     
-    if(enum_motor_error_state)
+    if(MS.enum_motor_error_state)
     {
         i_d_control_state = 0;
     }
@@ -2603,9 +2602,9 @@ static void i_d_control()
         alpha_temp = 0;
 
         // todo: if targetpower > 100W ... and HALL_STATE != SIXSTEP..
-        if( (enum_hall_angle_state == HALL_STATE_PLL) && ui8_pwm_enabled_flag)
+        if( (MS.enum_hall_angle_state == HALL_STATE_PLL) && ui8_pwm_enabled_flag)
         {
-            if(!enum_motor_error_state)
+            if(!MS.enum_motor_error_state)
             {
                 i_d_control_state = 1;
             }
@@ -2615,7 +2614,7 @@ static void i_d_control()
     if(i_d_control_state == 1)
     {
         // if targetpower < 50 W ..
-        if( (enum_hall_angle_state == HALL_STATE_SIXSTEP) || !ui8_pwm_enabled_flag)
+        if( (MS.enum_hall_angle_state == HALL_STATE_SIXSTEP) || !ui8_pwm_enabled_flag)
         {
             i_d_control_state = 0;
         }
@@ -2676,11 +2675,12 @@ void runPIcontrol()
     i_d_control();
     
     // testing - directly setting duty cycle
-    /*if(DD.go)
+    /*if(MS.ui8_go)
     {
-        MS.u_q = DD.ui16_value;
+        MS.u_q = MS.ui16_dbg_value;
         MS.u_d = 0;
         MS.foc_alpha = 0;
+        //MS.foc_alpha = MS.ui16_dbg_value2 * Q31_DEGREE;
 
         if(!ui8_pwm_enabled_flag)
         {
@@ -2718,7 +2718,7 @@ q31_t speed_PLL (q31_t ist, q31_t soll)
         q31_pll_abs_delta = delta;
     }
 
-    if(enum_hall_angle_state == HALL_STATE_PLL)
+    if(MS.enum_hall_angle_state == HALL_STATE_PLL)
     {
         if(q31_pll_abs_delta > (Q31_DEGREE * 25))
         {
@@ -2728,7 +2728,7 @@ q31_t speed_PLL (q31_t ist, q31_t soll)
             // PLL seems to be in trouble
             // fallback to extraploation
             ui8_extrapolation_hall_count = 30;
-            enum_hall_angle_state = HALL_STATE_EXTRAPOLATION;
+            MS.enum_hall_angle_state = HALL_STATE_EXTRAPOLATION;
         }
     }
 
