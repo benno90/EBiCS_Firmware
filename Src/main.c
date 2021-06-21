@@ -111,9 +111,6 @@ q31_t q31_pll_angle_per_tic = 0;
 int8_t i8_recent_rotor_direction=1;
 int16_t i16_hall_order=1;
 
-uint16_t uint16_half_rotation_counter=0;
-uint16_t uint16_full_rotation_counter=0;
-
 static uint8_t ui8_pwm_enabled_flag = 0;
 
 q31_t q31_rotorposition_absolute;
@@ -177,6 +174,9 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 static void enable_pwm();
 static void disable_pwm();
 static void trigger_motor_error(motor_error_state_t err);
+inline static uint8_t is_motor_error_set(motor_error_state_t err);
+inline static void clear_motor_error_flag(motor_error_state_t err);
+//
 static void calibrate_adc_offset(void);
 static void process_pedal_data(void);
 static void process_wheel_speed_data(void);
@@ -254,11 +254,13 @@ int main(void)
     MS.ui8_log = 1;
 
     MS.enum_hall_angle_state = HALL_STATE_SIXSTEP;
-    MS.enum_motor_error_state = MOTOR_STATE_NORMAL;
+    MS.ui32_motor_error_state = MOTOR_STATE_NORMAL;
 
     //
     MS.BatteryVoltageData.ui8_shift = 5;
+    MS.BatteryVoltageData.enum_voltage_state = VOLTAGE_STATE_NORMAL;
     MS.ChipTemperatureData.ui8_shift = 5;
+    MS.ChipTemperatureData.enum_temperature_state = TEMP_STATE_NOMRAL;
     MS.CurrentData.ui8_battery_current_shift = 3;
     MS.CurrentData.q31_battery_current_mA = 0;
     MS.CurrentData.q31_battery_current_mA_cumulated = 0;
@@ -457,16 +459,6 @@ int main(void)
     /* USER CODE BEGIN WHILE */
     while (1)
     {
-
-#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
-        // testing error triggering
-        //if (MS.ui16_dbg_value2)
-        //{
-        //    trigger_motor_error(MOTOR_STATE_DBG_ERROR);
-        //    MS.ui16_dbg_value2 = 0;
-        //}
-#endif
-
         // --------------------------------------------------
         // PI control
         //
@@ -504,7 +496,7 @@ int main(void)
         fast_loop_log();
 
         //----------------------------------------------------------------------------------------------------------------------------------------------------------
-        //slow loop procedere @16Hz, for LEV standard every 4th loop run, send page,
+        //slow loop procedere @16Hz
         if (ui32_tim3_counter > 500)
         {
 
@@ -1049,13 +1041,7 @@ static void MX_IWDG_Init(void)
 
 static void enable_pwm()
 {
-	uint16_half_rotation_counter=0;
-	uint16_full_rotation_counter=0;
-    //
-    uint32_t ui32_KV = 260000;
-    uint32_t u_q = ui32_KV * _T / (MS.BatteryVoltageData.q31_battery_voltage_V_x10 * uint32_tics_filtered >> 3);
-    //u_q = u_q + 50;
-    //u_q = 0;
+    uint32_t u_q = MOTOR_KV * _T / (MS.BatteryVoltageData.q31_battery_voltage_V_x10 * (uint32_tics_filtered >> 3) / 10);
 
     if(u_q > _U_MAX)
     {
@@ -1103,7 +1089,7 @@ static void disable_pwm()
 static void trigger_motor_error(motor_error_state_t err)
 {
     disable_pwm();
-    MS.enum_motor_error_state = err;
+    MS.ui32_motor_error_state |= (1 << err);   // beware: bit masking is not atomic
     ui8_motor_error_state_hall_count = 100;
 #if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
     switch(err)
@@ -1117,6 +1103,15 @@ static void trigger_motor_error(motor_error_state_t err)
         case MOTOR_STATE_HALL_ERROR:
             sprintf_(buffer, "\nERR: MOTOR_STATE_HALL_ERROR\n\n");
             break;
+        case MOTOR_STATE_OVER_SPEED:
+            sprintf_(buffer, "\nERR: OVER_SPEED\n\n");
+            break;
+        case MOTOR_STATE_CHIP_OVER_TEMPERATURE:
+            sprintf_(buffer, "\nERR: OVER_TEMPERATURE\n\n");
+            break;
+        case MOTOR_STATE_BATTERY_UNDERVOLTAGE:
+            sprintf_(buffer, "\nERR: BATTERY_UNDERVOLTAGE\n\n");
+            break;
         case MOTOR_STATE_DBG_ERROR:
             sprintf_(buffer, "\nERR: MOTOR_STATE_DBG_ERROR\n\n");
             break;
@@ -1126,6 +1121,22 @@ static void trigger_motor_error(motor_error_state_t err)
     }
     debug_print2((uint8_t *) buffer, strlen(buffer));
 #endif
+}
+
+inline static uint8_t is_motor_error_set(motor_error_state_t err)
+{
+    if(MS.ui32_motor_error_state & (1 << err))
+        return 1;
+    else
+        return 0;
+}
+
+inline static void clear_motor_error_flag(motor_error_state_t err)
+{
+    if(MS.ui32_motor_error_state & (1 << err))
+    {
+        MS.ui32_motor_error_state &= ~(1 << err);       // beware: bit masking is not atomic
+    }
 }
 
 
@@ -1275,6 +1286,26 @@ static void process_battery_voltage(void)
     MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
     MS.BatteryVoltageData.q31_battery_voltage_V_x10 =
         (MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated * CAL_BAT_V / 100) >> MS.BatteryVoltageData.ui8_shift;
+
+    voltage_state_t new_state = MS.BatteryVoltageData.enum_voltage_state;
+    switch(MS.BatteryVoltageData.enum_voltage_state)
+    {
+        case VOLTAGE_STATE_NORMAL:
+            if(MS.BatteryVoltageData.q31_battery_voltage_V_x10 < BATTERY_CRITICAL_VOLTAGE) 
+                new_state = VOLTAGE_STATE_CRITICAL;
+            break;
+        case VOLTAGE_STATE_CRITICAL:
+            if(MS.BatteryVoltageData.q31_battery_voltage_V_x10 > BATTERY_CRITICAL_VOLTAGE + 20) 
+                new_state = VOLTAGE_STATE_NORMAL;
+            if(MS.BatteryVoltageData.q31_battery_voltage_V_x10 < BATTERY_UNDER_VOLTAGE) 
+                new_state = VOLTAGE_STATE_UNDER_VOLTAGE_ERROR;
+            break;
+        case VOLTAGE_STATE_UNDER_VOLTAGE_ERROR:
+            if(MS.BatteryVoltageData.q31_battery_voltage_V_x10 > BATTERY_UNDER_VOLTAGE + 20) 
+                new_state = VOLTAGE_STATE_CRITICAL;
+            break;
+    }
+    MS.BatteryVoltageData.enum_voltage_state = new_state;
 }
 
 static void process_chip_temperature(void)
@@ -1300,6 +1331,28 @@ static void process_chip_temperature(void)
     {
         MS.ChipTemperatureData.q31_temperature_degrees = 0;
     }
+
+    temperature_state_t new_state = MS.ChipTemperatureData.enum_temperature_state;
+
+    // process state transition
+    switch(MS.ChipTemperatureData.enum_temperature_state)
+    {
+        case TEMP_STATE_NOMRAL:
+            if(MS.ChipTemperatureData.q31_temperature_degrees > CRITICAL_CHIP_TEMPERATURE) 
+                new_state = TEMP_STATE_CRITICAL;
+            break;
+        case TEMP_STATE_CRITICAL:
+            if(MS.ChipTemperatureData.q31_temperature_degrees > CHIP_OVER_TEMPERATURE) 
+                new_state = TEMP_STATE_OVER_TEMP_ERROR;
+            if(MS.ChipTemperatureData.q31_temperature_degrees < CRITICAL_CHIP_TEMPERATURE - 10) 
+                new_state = TEMP_STATE_NOMRAL;
+            break;
+        case TEMP_STATE_OVER_TEMP_ERROR:
+            if(MS.ChipTemperatureData.q31_temperature_degrees < CHIP_OVER_TEMPERATURE - 10)
+                new_state = TEMP_STATE_CRITICAL;
+            break;
+    }
+    MS.ChipTemperatureData.enum_temperature_state = new_state;
 
 }
 
@@ -1346,19 +1399,22 @@ static void debug_comm(void)
         {
         case 0:
 #ifndef BLUETOOTH_SERIALIZE_DISPLAY
-            // plot anything here
-            //sprintf_(buffer, "%u %u T: %u  U: %u\n", MS.enum_motor_error_state, ui8_six_step_hall_count, (uint16_t)MS.ChipTemperatureData.q31_temperature_degrees, (uint16_t)(MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
-            //uint32_t ui32_KV = ((ui16_timertics * MS.BatteryVoltageData.q31_battery_voltage_V_x10) >> 11) * MS.u_q;
-            //sprintf_(buffer, "kv: %lu\n", ui32_KV);
-            //
-            //uint32_t ui32_KV = 260000;
-            //uint32_t u_q = ui32_KV * _T / (MS.BatteryVoltageData.q31_battery_voltage_V_x10 * ui16_timertics);
-            //sprintf_(buffer, "%lu %lu | %u %lu\n", u_q, MS.u_q, ui16_timertics, uint32_tics_filtered >> 3);
-            //
-            //sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, MS.enum_motor_error_state, MS.enum_hall_angle_state, ui8_motor_error_state_hall_count);
-            //sprintf_(buffer, "%u %lu %lu\n", ui16_reg_adc_value, MS.PedalData.uint32_torque_Nm_x10, MS.PedalData.uint32_PAS);
-            sprintf_(buffer, "boost: %u\n", ui16_boost_counter);
             {
+                // plot anything here
+                //sprintf_(buffer, "%u %u T: %u  U: %u\n", MS.ui32_motor_error_state, ui8_six_step_hall_count, (uint16_t)MS.ChipTemperatureData.q31_temperature_degrees, (uint16_t)(MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+                uint32_t ui32_KV = ((ui16_timertics * MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10) >> 11) * MS.u_q;
+                uint16_t min_tic = (MOTOR_KV / MS.BatteryVoltageData.q31_battery_voltage_V_x10) * 10;
+                uint16_t max_kmh = internal_tics_to_speedx100(min_tic);
+                sprintf_(buffer, "kv: %lu | max v: %u\n", ui32_KV, max_kmh / 10);
+
+                //sprintf_(buffer, "%lu, %u\n", MS.ui32_motor_error_state, ui8_motor_error_state_hall_count);
+                //
+                //uint32_t u_q = ui32_KV * _T / (MS.BatteryVoltageData.q31_battery_voltage_V_x10 * ui16_timertics);
+                //sprintf_(buffer, "%lu %lu | %u %lu\n", u_q, MS.u_q, ui16_timertics, uint32_tics_filtered >> 3);
+                //
+                //sprintf_(buffer, "%u | %u | %u %u\n", ui16_timertics, MS.ui32_motor_error_state, MS.enum_hall_angle_state, ui8_motor_error_state_hall_count);
+                //sprintf_(buffer, "%u %lu %lu\n", ui16_reg_adc_value, MS.PedalData.uint32_torque_Nm_x10, MS.PedalData.uint32_PAS);
+                //sprintf_(buffer, "boost: %u\n", ui16_boost_counter);
                 //q31_t q31_battery_power_W_x10 = get_battery_power();
                 //q31_t q31_target_power_W_x10 = get_target_power();
                 //sprintf_(buffer, "%ld %ld\n", q31_target_power_W_x10, q31_battery_power_W_x10);
@@ -1422,6 +1478,9 @@ static void debug_comm(void)
 
             sprintf_(buffer, ".");
             break;
+        case 7:
+            sprintf_(buffer, "temp_state: %u, v_state: %u\n", MS.BatteryVoltageData.enum_voltage_state, MS.ChipTemperatureData.enum_temperature_state);
+            break;
         }
 
         debug_print((uint8_t *)buffer, strnlen(buffer, 100));
@@ -1461,8 +1520,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
         {
             MS.WheelSpeedData.uint32_external_SPEED_counter++;
         }
-		if(uint16_full_rotation_counter<8000)uint16_full_rotation_counter++;	//full rotation counter for motor standstill detection
-		if(uint16_half_rotation_counter<8000)uint16_half_rotation_counter++;	//half rotation counter for motor standstill detection
 
         ++tim3_prescaler;
         if(tim3_prescaler == 800)
@@ -1687,16 +1744,7 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 	}
 #endif
 
-	//int16_current_target=0;
-	// call FOC procedure if PWM is enabled
-
-    // always do the foc calculation
-	//if (READ_BIT(TIM1->BDTR, TIM_BDTR_MOE))
-    {
-	    FOC_calculation(i16_ph1_current, i16_ph2_current, q31_rotorposition_absolute, &MS);
-	}
-	//temp5=__HAL_TIM_GET_COUNTER(&htim1);
-	//set PWM
+    FOC_calculation(i16_ph1_current, i16_ph2_current, q31_rotorposition_absolute, &MS);
 
     // only update switchtimes if pwm is enabled
     if(ui8_pwm_enabled_flag)
@@ -1706,8 +1754,7 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 	    TIM1->CCR3 =  (uint16_t) switchtime[2];
     }
 
-
-
+    
 	//HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
 
 	} // end else
@@ -1760,7 +1807,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
                     // clear motor error after a certain amount of valid hall transitions
                     if(ui8_motor_error_state_hall_count > 0) -- ui8_motor_error_state_hall_count;
-                    if(ui8_motor_error_state_hall_count == 0) MS.enum_motor_error_state = MOTOR_STATE_NORMAL;
             	}
 
             	switch (ui8_hall_case) //12 cases for each transition from one stage to the next. 6x forward, 6x reverse
@@ -1769,7 +1815,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         		case 64:
         			q31_rotorposition_hall = DEG_plus120*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=1;
-        			uint16_full_rotation_counter=0;
         			break;
         		case 45:
         			q31_rotorposition_hall = DEG_plus180*i16_hall_order + q31_rotorposition_motor_specific;
@@ -1782,7 +1827,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         		case 13:
         			q31_rotorposition_hall = DEG_minus60*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=1;
-        			uint16_half_rotation_counter=0;
         			break;
         		case 32:
         			q31_rotorposition_hall = DEG_0*i16_hall_order + q31_rotorposition_motor_specific;
@@ -1805,7 +1849,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         		case 23:
         			q31_rotorposition_hall = DEG_0*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=-1;
-        			uint16_half_rotation_counter=0;
         			break;
         		case 31:
         			q31_rotorposition_hall = DEG_minus60*i16_hall_order + q31_rotorposition_motor_specific;
@@ -1818,7 +1861,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         		case 54:
         			q31_rotorposition_hall = DEG_plus180*i16_hall_order + q31_rotorposition_motor_specific;
         			i8_recent_rotor_direction=-1;
-        			uint16_full_rotation_counter=0;
         			break;*/
 
         		} // end case
@@ -1861,7 +1903,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
                 if(ui8_hall_error_count >= 3)
                 {
-                    //if(!MS.enum_motor_error_state)
                     if(ui8_pwm_enabled_flag)
                     {
                         // only trigger the error when pwm is enabled
@@ -2365,7 +2406,7 @@ static void limit_target_power(q31_t* p_q31_target_power_W_x10)
         // power requested
         // trigger boost timeout
         //if(MS.ui16_dbg_value2)
-        if(speed_kmh_x10 < 200)
+        if(speed_kmh_x10 < 200) //&& MS.BatteryVoltageData.enum_voltage_state == VOLTAGE_STATE_NORMAL && MS.ChipTemperatureData.enum_temperature_state == TEMP_STATE_NOMRAL
         {
             // todo: do not enable boost above certain chip temperature
             ui16_boost_counter = BOOST_TIME;
@@ -2382,6 +2423,14 @@ static void limit_target_power(q31_t* p_q31_target_power_W_x10)
     //{
     //    q31_max_power_W_x10 = 1000;
     //}
+
+    // ---------------------------------------
+    // over temperature and low voltage protection
+
+    if(MS.BatteryVoltageData.enum_voltage_state != VOLTAGE_STATE_NORMAL || MS.ChipTemperatureData.enum_temperature_state != TEMP_STATE_NOMRAL)
+    {
+        q31_max_power_W_x10 = MOTOR_REDUCED_POWER_MAX;
+    }
 
     if(*p_q31_target_power_W_x10 > q31_max_power_W_x10)
     {
@@ -2455,12 +2504,6 @@ static void limit_target_power(q31_t* p_q31_target_power_W_x10)
         *p_q31_target_power_W_x10 = *p_q31_target_power_W_x10 * (V2 - speed_kmh_x10) / 16;
     }
 
-    // ---------------------------------------
-    // todo: limit temperature
-
-
-    // ---------------------------------------
-    // todo: low voltage protection
 
 }
 
@@ -2469,15 +2512,13 @@ static void i_q_control()
 {
     static uint8_t i_q_control_state = 0;       // idle
 
-    static uint32_t print_count = 0;
-
     q31_t q31_battery_power_W_x10 = get_battery_power();
     q31_t q31_target_power_W_x10 = get_target_power();
     limit_target_power(&q31_target_power_W_x10);
     //
     static q31_t u_q_temp = 0;
 
-    if(MS.enum_motor_error_state)
+    if(MS.ui32_motor_error_state != MOTOR_STATE_NORMAL)
     {
         i_q_control_state = 0;
     }
@@ -2503,7 +2544,7 @@ static void i_q_control()
         // enable pwm if power is requested or velocity goes above a certain limit
         if(q31_target_power_W_x10 > 0  || (ui16_timertics < MOTOR_AUTO_ENABLE_THRESHOLD) )
         {
-            if(!MS.enum_motor_error_state)
+            if(MS.ui32_motor_error_state == MOTOR_STATE_NORMAL)
             {
                 if(ui16_timertics > (MOTOR_ENABLE_THRESHOLD))      // do not enable pwm above a ceratin limit velocity
                 {
@@ -2533,16 +2574,10 @@ static void i_q_control()
         u_q_temp = PI_control(&PI_iq);
 
 
-        if( ui16_timertics > SIXSTEPTHRESHOLD_DOWN && ui16_motor_init_state_timeout == 0 )
+        if( (uint32_tics_filtered >> 3) > SIXSTEPTHRESHOLD_DOWN && ui16_motor_init_state_timeout == 0 )
         {
             i_q_control_state = 0;
         }
-
-
-        if((uint16_full_rotation_counter>7999||uint16_half_rotation_counter>7999))
-        {
-            i_q_control_state = 0;
-		}
 
         //u_q_temp = u_q_target;
     }
@@ -2558,17 +2593,7 @@ static void i_q_control()
     }
 
     MS.u_q = u_q_temp;
-    MS.u_d = 0;
-    
-    //if(ui8_g_UART_TxCplt_flag && (print_count >= 10) && ui8_pwm_enabled_flag)
-    //if(ui8_g_UART_TxCplt_flag && (print_count >= 200))
-    //{
-        //sprintf_(buffer, "%u %d %d %d\n", i_q_control_state, u_q_temp, q31_battery_power_W_x10, q31_target_power_W_x10);
-        //debug_print(buffer, strlen(buffer));
-        //print_count = 0;
-    //}
-
-    ++print_count;
+    MS.u_d = 0;    
 }
 
 // todo: rename this function to angle control
@@ -2589,7 +2614,7 @@ static void i_d_control()
     q31_t alpha_temp = 0;
     //alpha_temp = q31_degree * DD.ui16_value2;
     
-    if(MS.enum_motor_error_state)
+    if(MS.ui32_motor_error_state != MOTOR_STATE_NORMAL)
     {
         i_d_control_state = 0;
     }
@@ -2604,7 +2629,7 @@ static void i_d_control()
         // todo: if targetpower > 100W ... and HALL_STATE != SIXSTEP..
         if( (MS.enum_hall_angle_state == HALL_STATE_PLL) && ui8_pwm_enabled_flag)
         {
-            if(!MS.enum_motor_error_state)
+            if(MS.ui32_motor_error_state == MOTOR_STATE_NORMAL)
             {
                 i_d_control_state = 1;
             }
@@ -2674,7 +2699,7 @@ void runPIcontrol()
     i_q_control();
     i_d_control();
     
-    // testing - directly setting duty cycle
+    // testing - directly setting duty cycle (comment i_q and i_d control for this -> open loop control)
     /*if(MS.ui8_go)
     {
         MS.u_q = MS.ui16_dbg_value;
@@ -2697,6 +2722,59 @@ void runPIcontrol()
             disable_pwm();
         }
     }*/
+
+    // -----------------------------------------
+    // error processing
+
+    if(ui8_motor_error_state_hall_count == 0)
+    {
+        const uint32_t mask = (1 << MOTOR_STATE_BLOCKED) | (1 << MOTOR_STATE_HALL_ERROR) | (1 << MOTOR_STATE_PLL_ERROR) | (1 << MOTOR_STATE_DBG_ERROR) | (1 << MOTOR_STATE_OVER_SPEED);
+        if(MS.ui32_motor_error_state & mask)
+        {
+            MS.ui32_motor_error_state &= ~mask; // clear errors
+        }               
+    }           
+    
+    if(MS.u_q >= _U_MAX && MS.CurrentData.q31_battery_current_mA < -2000) // todo: && !recuperation_flag
+    {
+        // uncontrolled recuperation due to overspeed
+        if(!is_motor_error_set(MOTOR_STATE_OVER_SPEED))
+            trigger_motor_error(MOTOR_STATE_OVER_SPEED);
+    }
+
+    // voltage
+    if(MS.BatteryVoltageData.enum_voltage_state == VOLTAGE_STATE_UNDER_VOLTAGE_ERROR)
+    {
+        if(!is_motor_error_set(MOTOR_STATE_BATTERY_UNDERVOLTAGE))   
+            trigger_motor_error(MOTOR_STATE_BATTERY_UNDERVOLTAGE);
+    }
+    else
+    {
+        if(is_motor_error_set(MOTOR_STATE_BATTERY_UNDERVOLTAGE))   
+            clear_motor_error_flag(MOTOR_STATE_BATTERY_UNDERVOLTAGE);
+    }
+
+    // chip temperature
+    if(MS.ChipTemperatureData.enum_temperature_state == TEMP_STATE_OVER_TEMP_ERROR)
+    {
+        if(!is_motor_error_set(MOTOR_STATE_CHIP_OVER_TEMPERATURE))
+            trigger_motor_error(MOTOR_STATE_CHIP_OVER_TEMPERATURE);
+    }
+    else
+    {
+        if(is_motor_error_set(MOTOR_STATE_CHIP_OVER_TEMPERATURE))
+            clear_motor_error_flag(MOTOR_STATE_CHIP_OVER_TEMPERATURE);
+    }
+
+    #if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
+    // testing error triggering
+    if (MS.ui16_dbg_value2)
+    {
+        trigger_motor_error(MOTOR_STATE_DBG_ERROR);
+        MS.ui16_dbg_value2 = 0;
+    }
+    #endif
+
 
     PI_flag = 0;
 }

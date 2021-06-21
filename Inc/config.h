@@ -29,24 +29,27 @@
 #define CAL_V 25     // adcData[0] * CAL_V = voltage in mV
 #define CAL_I 55      //38       
 #define CAL_TORQUE 11 //16
-#define INDUCTANCE 6LL
-#define RESISTANCE 40LL
-#define FLUX_LINKAGE 1200LL
-#define GAMMA 9LL
-#define BATTERY_LEVEL_1 323000
-#define BATTERY_LEVEL_2 329000
-#define BATTERY_LEVEL_3 344000
-#define BATTERY_LEVEL_4 368000
-#define BATTERY_LEVEL_5 380000
+#define MOTOR_KV 26000
+
+//#define INDUCTANCE 6LL
+//#define RESISTANCE 40LL
+//#define FLUX_LINKAGE 1200LL
+//#define GAMMA 9LL
+
+#define BATTERY_UNDER_VOLTAGE 400         // in V x 10
+#define BATTERY_CRITICAL_VOLTAGE 425    // in V x 10
+
+#define CRITICAL_CHIP_TEMPERATURE 70    // in degrees
+#define CHIP_OVER_TEMPERATURE 80        // in degrees
+
 #define P_FACTOR_I_Q 10 //500    // 0
 #define I_FACTOR_I_Q 1 //20     // 4
 #define P_FACTOR_I_D 500 //500
 #define I_FACTOR_I_D 60
 #define P_FACTOR_SPEED 100
 #define I_FACTOR_SPEED 10
-#define TS_COEF 90000
+
 #define PAS_TIMEOUT 4000
-#define RAMP_END 1600
 #define THROTTLE_OFFSET 50
 #define THROTTLE_MAX 4000
 #define WHEEL_CIRCUMFERENCE 2234
@@ -55,6 +58,7 @@
 #define SPEEDLIMIT_WALK_ASSIST 4
 #define PULSES_PER_REVOLUTION 1
 #define MOTOR_POWER_MAX 10000        // in W x 10
+#define MOTOR_REDUCED_POWER_MAX 3000
 #define MOTOR_POWER_BOOST_DELTA 3500  // in W x 10
 #define PH_CURRENT_MAX 500          // in ampere x 10 (ac amplitude)
 #define PH_CURRENT_BOOST_DELTA 250    // in ampere x 10 (ac amplitude)
@@ -71,8 +75,6 @@
 #define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
 //#define BLUETOOTH_SERIALIZE_DISPLAY
 //#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
-#define PUSHASSIST_CURRENT 30
-#define VOLTAGE_MIN 300
 #define REGEN_CURRENT 0
 //#define FAST_LOOP_LOG
 #define FAST_LOOP_LOG_SIZE 256
@@ -90,9 +92,10 @@
 #define INTERNAL 0
 #define SPEEDSOURCE INTERNAL
 
-#define SIXSTEPTHRESHOLD_UP 5586            // 5 kmh    
-#define SIXSTEPTHRESHOLD_DOWN 9310         // 3 kmh
-#define MOTOR_ENABLE_THRESHOLD 940         // approx 30 kmh
+#define SIXSTEPTHRESHOLD_UP 5586            // 5 kmh    -> 2.5
+#define SIXSTEPTHRESHOLD_DOWN 9310         // 3 kmh     -> 2
+//#define MOTOR_ENABLE_THRESHOLD 940         // approx 30 kmh
+#define MOTOR_ENABLE_THRESHOLD 700         // approx 40 kmh
 #define MOTOR_AUTO_ENABLE_THRESHOLD 2800         // 10 kmh
 #define HALL_TIMEOUT 64000                 // 0.44 kmh
 

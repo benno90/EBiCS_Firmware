@@ -110,7 +110,15 @@ extern volatile uint32_t ui32_tim1_counter;
 
 typedef enum {HALL_STATE_SIXSTEP = 0, HALL_STATE_EXTRAPOLATION = 1, HALL_STATE_PLL = 2} hall_angle_state_t;
 
-typedef enum {MOTOR_STATE_NORMAL = 0, MOTOR_STATE_BLOCKED = 1, MOTOR_STATE_PLL_ERROR = 2, MOTOR_STATE_HALL_ERROR = 3, MOTOR_STATE_DBG_ERROR = 10} motor_error_state_t;
+typedef enum {MOTOR_STATE_NORMAL = 0, 
+                MOTOR_STATE_BLOCKED = 1, 
+                MOTOR_STATE_PLL_ERROR = 2, 
+                MOTOR_STATE_HALL_ERROR = 3, 
+                MOTOR_STATE_CHIP_OVER_TEMPERATURE = 4,
+                MOTOR_STATE_BATTERY_UNDERVOLTAGE = 5,
+                MOTOR_STATE_OVER_SPEED = 6,
+                MOTOR_STATE_DBG_ERROR = 10,
+                } motor_error_state_t;
 
 typedef enum {VOLTAGE_STATE_NORMAL = 0, VOLTAGE_STATE_CRITICAL = 1, VOLTAGE_STATE_UNDER_VOLTAGE_ERROR = 2} voltage_state_t;
 
@@ -194,7 +202,7 @@ typedef struct
 	int8_t         	gear_state;
 	//int8_t         	error_state;
     hall_angle_state_t enum_hall_angle_state;
-    motor_error_state_t enum_motor_error_state;
+    uint32_t        ui32_motor_error_state;
 
     //
     uint8_t         ui8_dbg_log_value;
