@@ -28,7 +28,7 @@
 #define CAL_BAT_V 25   
 #define CAL_V 25     // adcData[0] * CAL_V = voltage in mV
 #define CAL_I 55      //38       
-#define CAL_TORQUE 11 //16
+#define CAL_TORQUE 16 //11
 #define MOTOR_KV 26000
 
 //#define INDUCTANCE 6LL
@@ -71,10 +71,14 @@
 #define FRAC_LOW 15
 #define TS_MODE
 #define TQ_ADC_INDEX 6  // AD1: 6, SP: 1
-#define TEMP_ADC_INDEX 5 // ADC_CHANNEL_TEMPSENSOR
-#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
+
+#define CHIP_TEMP_ADC_INDEX 5 // ADC_CHANNEL_TEMPSENSOR
+#define MOTOR_TEMP_SENSOR_INSTALLED 
+#define MOTOR_TEMP_ADC_INDEX 1 // motor temp on sp
+
+//#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
 //#define BLUETOOTH_SERIALIZE_DISPLAY
-//#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
+#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
 #define REGEN_CURRENT 0
 //#define FAST_LOOP_LOG
 #define FAST_LOOP_LOG_SIZE 256

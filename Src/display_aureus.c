@@ -117,8 +117,8 @@ void Display_Service(MotorState_t *pMS)
         TxBuff[3] = 0x05;
         TxBuff[4] = 0x0;                     // low voltage
         // battery current
-        if(pMS->q31_battery_current_mA > 1000)
-            ui16_temp = pMS->q31_battery_current_mA / 333;  // the display expects the batter current in ampere x 3
+        if(pMS->CurrentData.q31_battery_current_mA > 1000)
+            ui16_temp = pMS->CurrentData.q31_battery_current_mA / 333;  // the display expects the batter current in ampere x 3
         else
             ui16_temp = 0;
         TxBuff[5] = ui16_temp;
@@ -131,9 +131,10 @@ void Display_Service(MotorState_t *pMS)
             ui16_temp = pMS->ui16_wheel_time_ms;
         TxBuff[6] = (ui16_temp & 0xFF00) >> 8;
         TxBuff[7] = (ui16_temp & 0x00FF);
+
         // error state
-        // todo -> make motor state enum global...
-        switch(pMS->error_state)
+        // currently not sending any errors to the display
+        /*switch(pMS->error_state)
         {
             case 0:         //MOTOR_STATE_NORMAL:
                 TxBuff[8] = 0;
@@ -154,7 +155,7 @@ void Display_Service(MotorState_t *pMS)
             default:
                 TxBuff[8] = 0;
                 break;
-        }
+        }*/
         //
         ui16_checksum = TxBuff[1] + TxBuff[2] + TxBuff[3] + TxBuff[4] + TxBuff[5] + TxBuff[6] + TxBuff[7] + TxBuff[8];
         TxBuff[9] = ui16_checksum & 0xFF;

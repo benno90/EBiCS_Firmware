@@ -182,6 +182,7 @@ static void process_pedal_data(void);
 static void process_wheel_speed_data(void);
 static void process_battery_voltage(void);
 static void process_chip_temperature(void);
+static void process_motor_temperature(void);
 static void fast_loop_log(void);
 static void debug_comm(void);
 
@@ -388,24 +389,11 @@ int main(void)
 
     calibrate_adc_offset();
 
-// comment hochsitzcola 20.05.21
-#ifdef DISABLE_DYNAMIC_ADC               // set  injected channel with offsets
-    ADC1->JSQR = 0b00100000000000000000; //ADC1 injected reads phase A JL = 0b00, JSQ4 = 0b00100 (decimal 4 = channel 4)
-    ADC1->JOFR1 = ui16_ph1_offset;
-    ADC2->JSQR = 0b00101000000000000000; //ADC2 injected reads phase B, JSQ4 = 0b00101, decimal 5
-    ADC2->JOFR1 = ui16_ph2_offset;
-#endif
-
-
-#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
-    printf_("phase current offsets:  %d, %d, %d \n ", ui16_ph1_offset, ui16_ph2_offset, ui16_ph3_offset);
-    printf_("torque offset:  %d\n", ui16_torque_offset);
 #if (AUTODETECT == 1)
     autodetect();
     while (1) { };
 #endif
 
-#endif
 #if (DISPLAY_TYPE != DISPLAY_TYPE_DEBUG || !AUTODETECT)
     EE_ReadVariable(EEPROM_POS_SPEC_ANGLE, &MP.spec_angle);
 
@@ -436,18 +424,18 @@ int main(void)
 #ifdef ACTIVATE_WATCHDOG
     if(__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST))
     {
-#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
+        #if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
         printf_("watchdog reset!\n");
-#endif
+        #endif
         // do not continue here if reset from watchdog
         while(1){}
         //__HAL_RCC_CLEAR_RESET_FLAGS();
     }
     else
     {
-#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
+        #if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
         printf_("regular reset!\n");
-#endif
+        #endif
     }
     // start independent watchdog
     MX_IWDG_Init();
@@ -515,6 +503,7 @@ int main(void)
                 // --------------------------------------------------
                 process_battery_voltage();
                 process_chip_temperature();
+                process_motor_temperature();
 
                 ui8_slowloop_counter = 16;
             }
@@ -1163,7 +1152,7 @@ static void calibrate_adc_offset(void)
         ui16_ph3_offset += adcData[4];
         ui16_torque_offset += adcData[TQ_ADC_INDEX];
         MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated += adcData[0];
-        MS.ChipTemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
+        MS.ChipTemperatureData.q31_temperature_adc_cumulated += adcData[CHIP_TEMP_ADC_INDEX];
         ui8_adc_regular_flag = 0;
     }
     ui16_ph1_offset = ui16_ph1_offset >> 5;
@@ -1183,6 +1172,20 @@ static void calibrate_adc_offset(void)
     MS.ChipTemperatureData.q31_temperature_degrees = 0; // setting it in the slow loop
     
     ui8_adc_offset_done_flag = 1;
+
+// comment hochsitzcola 20.05.21
+#ifdef DISABLE_DYNAMIC_ADC               // set  injected channel with offsets
+    ADC1->JSQR = 0b00100000000000000000; //ADC1 injected reads phase A JL = 0b00, JSQ4 = 0b00100 (decimal 4 = channel 4)
+    ADC1->JOFR1 = ui16_ph1_offset;
+    ADC2->JSQR = 0b00101000000000000000; //ADC2 injected reads phase B, JSQ4 = 0b00101, decimal 5
+    ADC2->JOFR1 = ui16_ph2_offset;
+#endif
+
+
+#if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
+    printf_("phase current offsets:  %d, %d, %d \n ", ui16_ph1_offset, ui16_ph2_offset, ui16_ph3_offset);
+    printf_("torque offset:  %d\n", ui16_torque_offset);
+#endif
 }
 
 static void process_pedal_data(void)
@@ -1311,7 +1314,7 @@ static void process_battery_voltage(void)
 static void process_chip_temperature(void)
 {
     MS.ChipTemperatureData.q31_temperature_adc_cumulated -= (MS.ChipTemperatureData.q31_temperature_adc_cumulated >> MS.ChipTemperatureData.ui8_shift);
-    MS.ChipTemperatureData.q31_temperature_adc_cumulated += adcData[TEMP_ADC_INDEX];
+    MS.ChipTemperatureData.q31_temperature_adc_cumulated += adcData[CHIP_TEMP_ADC_INDEX];
 
     // data sheet STM32F103x4
     // 5.3.19 Temperature sensor characteristics
@@ -1319,7 +1322,7 @@ static void process_chip_temperature(void)
     // avg solpe 4.3 mV / degree
 
     // recover voltage (3.3V  ref voltage, 2^12 = 4096)
-    // int32_t v_temp = adcData[TEMP_ADC_INDEX] * 3300 >> 12; // voltage in mV
+    // int32_t v_temp = adcData[CHIP_TEMP_ADC_INDEX] * 3300 >> 12; // voltage in mV
     int32_t v_temp = (MS.ChipTemperatureData.q31_temperature_adc_cumulated >> MS.ChipTemperatureData.ui8_shift) * 3300 >> 12; // voltage in mV
     //
     v_temp = (1430 - v_temp) * 10 / 43 + 25;
@@ -1354,6 +1357,28 @@ static void process_chip_temperature(void)
     }
     MS.ChipTemperatureData.enum_temperature_state = new_state;
 
+}
+
+static void process_motor_temperature(void)
+{
+#ifdef MOTOR_TEMP_SENSOR_INSTALLED
+    // TMP36 : 10 mV / K
+    // 
+    uint16_t raw_data = adcData[MOTOR_TEMP_ADC_INDEX];
+    // scale adc reading to mv, somehow needed to use 5000 here instead of 3300 ?
+    int32_t v_temp = raw_data * 5000 >> 12;
+    v_temp = 25 + (v_temp - 750) / 10;
+    v_temp += 10; // additional offset from test measurement..
+
+    if(v_temp > 0)
+    {
+        MS.MotorTemperatureData.q31_temperature_degrees = v_temp;
+    }
+    else
+    {
+        MS.MotorTemperatureData.q31_temperature_degrees = 0;
+    }
+#endif
 }
 
 static void fast_loop_log(void)
@@ -1402,10 +1427,15 @@ static void debug_comm(void)
             {
                 // plot anything here
                 //sprintf_(buffer, "%u %u T: %u  U: %u\n", MS.ui32_motor_error_state, ui8_six_step_hall_count, (uint16_t)MS.ChipTemperatureData.q31_temperature_degrees, (uint16_t)(MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
-                uint32_t ui32_KV = ((ui16_timertics * MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10) >> 11) * MS.u_q;
-                uint16_t min_tic = (MOTOR_KV / MS.BatteryVoltageData.q31_battery_voltage_V_x10) * 10;
-                uint16_t max_kmh = internal_tics_to_speedx100(min_tic);
-                sprintf_(buffer, "kv: %lu | max v: %u\n", ui32_KV, max_kmh / 10);
+
+                // KV
+                //uint32_t ui32_KV = ((ui16_timertics * MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10) >> 11) * MS.u_q;
+                //uint16_t min_tic = (MOTOR_KV / MS.BatteryVoltageData.q31_battery_voltage_V_x10) * 10;
+                //uint16_t max_kmh = internal_tics_to_speedx100(min_tic);
+                //sprintf_(buffer, "kv: %lu | max v: %u\n", ui32_KV, max_kmh / 10);
+
+                // motor temperature
+                sprintf_(buffer, "adcdata[1] = %u %ld\n", adcData[1], MS.MotorTemperatureData.q31_temperature_degrees);
 
                 //sprintf_(buffer, "%lu, %u\n", MS.ui32_motor_error_state, ui8_motor_error_state_hall_count);
                 //
@@ -2574,13 +2604,31 @@ static void i_q_control()
         u_q_temp = PI_control(&PI_iq);
 
 
+        //if( (uint32_tics_filtered >> 3) > SIXSTEPTHRESHOLD_DOWN && ui16_motor_init_state_timeout == 0 && MS.u_q < 300)
         if( (uint32_tics_filtered >> 3) > SIXSTEPTHRESHOLD_DOWN && ui16_motor_init_state_timeout == 0 )
         {
+            //i_q_control_state = 2;
             i_q_control_state = 0;
         }
 
         //u_q_temp = u_q_target;
     }
+
+    /*if(i_q_control_state == 2)
+    {
+        // ramp down -> no noise
+        for(uint8_t i = 0; i < 2; ++i)
+        {
+            if(MS.u_q > 0)
+            {
+                --MS.u_q;
+            }
+        }
+        if(MS.u_q == 0)
+        {
+            i_q_control_state = 0;
+        }
+    }*/
 
 
     if(u_q_temp > _U_MAX)
@@ -2685,6 +2733,7 @@ static void i_d_control()
 
 void runPIcontrol()
 {
+    // -----------------------------------------
     // feed the dog
     //if(MS.ui16_dbg_value2 == 0)   // trigger the watchdog
     {
@@ -2699,6 +2748,7 @@ void runPIcontrol()
     i_q_control();
     i_d_control();
     
+    // -----------------------------------------
     // testing - directly setting duty cycle (comment i_q and i_d control for this -> open loop control)
     /*if(MS.ui8_go)
     {
