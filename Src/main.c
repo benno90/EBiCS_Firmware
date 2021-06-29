@@ -81,6 +81,7 @@ IWDG_HandleTypeDef hiwdg;
 volatile uint32_t ui32_tim1_counter=0;
 uint32_t ui32_tim3_counter=0;
 static uint16_t ui16_boost_counter = 0;
+static uint16_t ui16_angle_opt_counter = 0;
 
 uint8_t ui8_hall_state=0;
 uint8_t ui8_hall_state_old=0;
@@ -242,6 +243,7 @@ int main(void)
 
     //initialize MS struct.
     MS.hall_angle_detect_flag = 1;
+    MS.ui8_rotor_angle_opt_flag = 0;
     MS.ui8_assist_level = 1;
     MS.regen_level = 7;
     MP.pulses_per_revolution = PULSES_PER_REVOLUTION;
@@ -395,7 +397,7 @@ int main(void)
     while (1) { };
 #endif
 
-#if (DISPLAY_TYPE != DISPLAY_TYPE_DEBUG || !AUTODETECT)
+#ifdef READ_SPEC_ANGLE_FROM_EEPROM
     EE_ReadVariable(EEPROM_POS_SPEC_ANGLE, &MP.spec_angle);
 
     // set motor specific angle to value from emulated EEPROM only if valid
@@ -1160,7 +1162,7 @@ static void calibrate_adc_offset(void)
     ui16_ph2_offset = ui16_ph2_offset >> 5;
     ui16_ph3_offset = ui16_ph3_offset >> 5;
     ui16_torque_offset = ui16_torque_offset >> 5;
-    ui16_torque_offset += 30; // hardcoded offset -> move to config.h
+    ui16_torque_offset += TORQUE_ADC_OFFSET; // hardcoded offset -> move to config.h
 
     MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated =
         (MS.BatteryVoltageData.q31_battery_voltage_adc_cumulated >> 5) << MS.BatteryVoltageData.ui8_shift;
@@ -1560,9 +1562,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
             tim3_prescaler = 0;
             // decrement boost counter at 10 Hz
             if(ui16_boost_counter)
-            {
                 --ui16_boost_counter;
-            }
+
+            if(ui16_angle_opt_counter)
+                --ui16_angle_opt_counter;
         }
 	}
 
@@ -2139,6 +2142,146 @@ static void set_inj_channel(char state){
 
 }
 
+#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
+
+static void rotor_angle_opt(void)
+{
+
+    // the purpose of this routine is to vary the specific rotor angle
+    // the optimial rotor angle is where the wheel speed is the highest (minimum timer tics)
+    // currently letting the i_d control run during this routine
+    // findings so far: the angle evaluated with autodetect seems to be really close to the optimum
+
+    static uint8_t ui8_angle_opt_state = 0;
+    static const q31_t q31_target_u_q = 1000;
+    static q31_t q31_angle_opt_delta = 0;
+    static int8_t i8_angle;
+    
+    static int8_t i8_min_angle;
+    static uint16_t min_tics;
+
+    static q31_t q31_rotor_angle_spec_orig;
+
+    if(MS.ui32_motor_error_state)
+    {
+        disable_pwm();
+        MS.ui8_rotor_angle_opt_flag = 0;
+        q31_rotorposition_motor_specific = q31_rotor_angle_spec_orig;
+        sprintf_(buffer, "rotor angle opt failed.\n");
+        debug_print2((uint8_t *)buffer, strnlen(buffer, 100));
+    }
+
+    if(MS.u_q == 0 && ui8_angle_opt_state == 0 && !ui8_pwm_enabled_flag)
+    {
+        enable_pwm();
+        i8_angle = -7;
+        q31_angle_opt_delta = i8_angle * Q31_DEGREE;
+        min_tics = 0xFFFF;
+        q31_rotor_angle_spec_orig = q31_rotorposition_motor_specific;
+        q31_rotorposition_motor_specific = q31_rotor_angle_spec_orig + q31_angle_opt_delta;
+        sprintf_(buffer, "->ramp up.\n");
+        debug_print2((uint8_t *)buffer, strnlen(buffer, 100));
+        ui8_angle_opt_state = 1;
+    }
+
+    if(ui8_angle_opt_state == 1)
+    {
+        // ramp up
+        if(MS.u_q < q31_target_u_q)
+        {
+            if(ui16_angle_opt_counter == 0)
+            {
+                MS.u_q += 20;
+                ui16_angle_opt_counter = 3;
+            }
+        }
+        else
+        {
+            MS.u_q = q31_target_u_q;
+            if(ui16_angle_opt_counter == 0)
+            {
+                sprintf_(buffer, "->state2\n");
+                debug_print2((uint8_t *)buffer, strnlen(buffer, 100));
+                ui8_angle_opt_state = 2;
+                ui16_angle_opt_counter = 100; // 10s
+            }
+        }
+    }
+
+    if(ui8_angle_opt_state == 2)
+    {
+        /*if(ui16_angle_opt_counter == 0)
+        {
+            sprintf_(buffer, "->state3.\n");
+            debug_print2((uint8_t *)buffer, strnlen(buffer, 100));
+            ui8_angle_opt_state = 3;
+        }*/
+
+        //
+        // optimization routine
+        // 
+        if(ui16_angle_opt_counter == 0)
+        {
+            if(i8_angle < 8)
+            {
+                uint16_t tics_temp = uint32_tics_filtered>>3;
+                sprintf_(buffer, "angle: %d - tics: %u\n", i8_angle, tics_temp);
+                debug_print2((uint8_t *)buffer, strnlen(buffer, 100));
+                if(tics_temp < min_tics)
+                {
+                    min_tics = tics_temp;
+                    i8_min_angle = i8_angle;
+                }
+                ++i8_angle;
+                q31_angle_opt_delta = i8_angle * Q31_DEGREE;        
+                q31_rotorposition_motor_specific = q31_rotor_angle_spec_orig + q31_angle_opt_delta;
+                ui16_angle_opt_counter = 100; // 10s
+            }
+            else
+            {
+                sprintf_(buffer, "->ramp down\n");
+                debug_print2((uint8_t *)buffer, strnlen(buffer, 100));
+                ui8_angle_opt_state = 3;
+            }
+        }
+    }
+
+    if(ui8_angle_opt_state == 3)
+    {
+        if(MS.u_q >= 20)
+        {
+            if(ui16_angle_opt_counter == 0)
+            {
+                MS.u_q -= 20;
+                ui16_angle_opt_counter = 2;
+            }
+        }
+        else
+        {
+            MS.u_q = 0;
+            if(ui16_angle_opt_counter == 0)
+            {
+                ui8_angle_opt_state = 4;
+                disable_pwm();
+            }
+        }
+    }
+
+    if(ui8_angle_opt_state == 4)
+    {
+        sprintf_(buffer, "DONE\nmin angle: %d - min tics: %u\n", i8_min_angle, min_tics);
+        debug_print2((uint8_t *)buffer, strnlen(buffer, 100));
+        q31_angle_opt_delta = 0;
+        q31_rotorposition_motor_specific = q31_rotor_angle_spec_orig;
+        MS.ui8_rotor_angle_opt_flag = 0;
+    }
+
+    if(MS.u_q > q31_target_u_q)
+    {
+        MS.u_q = q31_target_u_q;
+    }
+}
+
 void autodetect()
 {
     printf_("\nAUTODETECT\n");
@@ -2266,6 +2409,8 @@ void autodetect()
 
     HAL_Delay(5);
 }
+
+#endif //DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
 
 void get_standstill_position(){
 	  HAL_Delay(100);
@@ -2743,9 +2888,20 @@ void runPIcontrol()
     {
         return;
     }
-    
-    i_q_control();
-    i_d_control();
+
+#if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
+    if(MS.ui8_rotor_angle_opt_flag)
+    {
+        rotor_angle_opt();
+        i_d_control();
+    }
+    else
+#endif
+    {
+        // regular motor control
+        i_q_control();
+        i_d_control();
+    }
     
     // -----------------------------------------
     // testing - directly setting duty cycle (comment i_q and i_d control for this -> open loop control)

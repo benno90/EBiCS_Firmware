@@ -18,6 +18,7 @@
 #define DISPLAY_TYPE_DEBUG (1<<0)							// For ASCII-Output in Debug mode);
 
 #define ACTIVATE_WATCHDOG
+//#define READ_SPEC_ANGLE_FROM_EEPROM
 
 #define TRIGGER_OFFSET_ADC 100 // 50
 #define _T_SHIFT 11 
@@ -29,6 +30,7 @@
 #define CAL_V 25     // adcData[0] * CAL_V = voltage in mV
 #define CAL_I 55      //38       
 #define CAL_TORQUE 16 //11
+#define TORQUE_ADC_OFFSET 40   // 30
 #define MOTOR_KV 26000
 
 //#define INDUCTANCE 6LL
@@ -76,9 +78,9 @@
 #define MOTOR_TEMP_SENSOR_INSTALLED 
 #define MOTOR_TEMP_ADC_INDEX 1 // motor temp on sp
 
-#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
+//#define DISPLAY_TYPE DISPLAY_TYPE_DEBUG
 //#define BLUETOOTH_SERIALIZE_DISPLAY
-//#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
+#define DISPLAY_TYPE DISPLAY_TYPE_AUREUS
 #define REGEN_CURRENT 0
 //#define FAST_LOOP_LOG
 #define FAST_LOOP_LOG_SIZE 256

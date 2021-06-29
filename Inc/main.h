@@ -101,6 +101,7 @@
 
 int32_t map (int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t out_max);
 void autodetect();
+void rotor_angle_opt();
 void runPIcontrol();
 
 void UART_IdleItCallback(void);
@@ -194,6 +195,7 @@ typedef struct
 	q31_t          	u_abs;
 	//q31_t          	q31_battery_current_mA;
 	uint8_t 		hall_angle_detect_flag;
+    uint8_t         ui8_rotor_angle_opt_flag;
 	uint8_t 		char_dyn_adc_state;
 	uint8_t 		ui8_assist_level;
 	uint8_t 		regen_level;

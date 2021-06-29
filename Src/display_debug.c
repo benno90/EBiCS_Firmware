@@ -184,6 +184,13 @@ void Display_Service(MotorState_t *pMS)
             debug_print2(TxBuff, 10);
         }
     }
+    else if(strncmp((char *) TxBuff, "angleopt", 8) == 0)
+    {
+        if(!pMS->ui8_rotor_angle_opt_flag)
+        {
+            pMS->ui8_rotor_angle_opt_flag = 1;
+        }
+    }
 
 
     // set buffer read index to buffer write index
