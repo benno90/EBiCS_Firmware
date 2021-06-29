@@ -258,10 +258,11 @@ int main(void)
     MS.ui32_motor_error_state = MOTOR_STATE_NORMAL;
 
     //
-    MS.BatteryVoltageData.ui8_shift = 5;
+    MS.BatteryVoltageData.ui8_shift = 6;
     MS.BatteryVoltageData.enum_voltage_state = VOLTAGE_STATE_NORMAL;
     MS.ChipTemperatureData.ui8_shift = 5;
     MS.ChipTemperatureData.enum_temperature_state = TEMP_STATE_NOMRAL;
+    MS.MotorTemperatureData.ui8_shift = 5;
     MS.CurrentData.ui8_battery_current_shift = 3;
     MS.CurrentData.q31_battery_current_mA = 0;
     MS.CurrentData.q31_battery_current_mA_cumulated = 0;
@@ -413,8 +414,8 @@ int main(void)
     // set absolute position to corresponding hall pattern.
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
-    printf_("Lishui FOC v0.9 \n ");
-    printf_("Motor specific angle:  %d, direction %d \n ", q31_rotorposition_motor_specific, i16_hall_order);
+    printf_("LISHUI OPEN SOURCE FOC FIRMWARE\n");
+    printf_("motor specific angle:  %d\nhall order: %d\n\n", q31_rotorposition_motor_specific, i16_hall_order);
 #endif
 
     CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE); //Disable PWM
@@ -434,7 +435,7 @@ int main(void)
     else
     {
         #if DISPLAY_TYPE == DISPLAY_TYPE_DEBUG
-        printf_("regular reset!\n");
+        printf_("regular reset\n\n");
         #endif
     }
     // start independent watchdog
@@ -649,7 +650,7 @@ if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
 */
 sConfig.Channel = ADC_CHANNEL_3; //Connector SP: throttle input
 sConfig.Rank = ADC_REGULAR_RANK_2;
-sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;//ADC_SAMPLETIME_239CYCLES_5;
+sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5; //ADC_SAMPLETIME_1CYCLE_5
 if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
 {
 _Error_Handler(__FILE__, __LINE__);
@@ -1170,6 +1171,10 @@ static void calibrate_adc_offset(void)
     MS.ChipTemperatureData.q31_temperature_adc_cumulated =
         (MS.ChipTemperatureData.q31_temperature_adc_cumulated >> 5) << MS.ChipTemperatureData.ui8_shift;
     MS.ChipTemperatureData.q31_temperature_degrees = 0; // setting it in the slow loop
+
+    #ifdef MOTOR_TEMP_SENSOR_INSTALLED
+    MS.MotorTemperatureData.q31_temperature_adc_cumulated = (adcData[MOTOR_TEMP_ADC_INDEX] << MS.MotorTemperatureData.ui8_shift);
+    #endif
     
     ui8_adc_offset_done_flag = 1;
 
@@ -1183,8 +1188,8 @@ static void calibrate_adc_offset(void)
 
 
 #if (DISPLAY_TYPE == DISPLAY_TYPE_DEBUG)
-    printf_("phase current offsets:  %d, %d, %d \n ", ui16_ph1_offset, ui16_ph2_offset, ui16_ph3_offset);
-    printf_("torque offset:  %d\n", ui16_torque_offset);
+    printf_("phase current offsets:  %d, %d, %d\n", ui16_ph1_offset, ui16_ph2_offset, ui16_ph3_offset);
+    printf_("torque offset:  %d\n\n", ui16_torque_offset);
 #endif
 }
 
@@ -1327,13 +1332,9 @@ static void process_chip_temperature(void)
     //
     v_temp = (1430 - v_temp) * 10 / 43 + 25;
     if (v_temp > 0)
-    {
         MS.ChipTemperatureData.q31_temperature_degrees = v_temp;
-    }
     else
-    {
         MS.ChipTemperatureData.q31_temperature_degrees = 0;
-    }
 
     temperature_state_t new_state = MS.ChipTemperatureData.enum_temperature_state;
 
@@ -1362,22 +1363,22 @@ static void process_chip_temperature(void)
 static void process_motor_temperature(void)
 {
 #ifdef MOTOR_TEMP_SENSOR_INSTALLED
-    // TMP36 : 10 mV / K
     // 
-    uint16_t raw_data = adcData[MOTOR_TEMP_ADC_INDEX];
-    // scale adc reading to mv, somehow needed to use 5000 here instead of 3300 ?
-    int32_t v_temp = raw_data * 5000 >> 12;
+    MS.MotorTemperatureData.q31_temperature_adc_cumulated -= (MS.MotorTemperatureData.q31_temperature_adc_cumulated >> MS.MotorTemperatureData.ui8_shift);
+    MS.MotorTemperatureData.q31_temperature_adc_cumulated += adcData[MOTOR_TEMP_ADC_INDEX];
+    //uint16_t raw_data = adcData[MOTOR_TEMP_ADC_INDEX];
+    // adc: mapping 5000mV to 1 << 12 = 4096 adc steps
+    // scale adc reading to mv
+    int32_t v_temp = (MS.MotorTemperatureData.q31_temperature_adc_cumulated >> MS.MotorTemperatureData.ui8_shift) * 5000 >> 12;
+    // TMP36 : 750 mv @ 25 degrees
+    // TMP36 : 10 mV / K slope
     v_temp = 25 + (v_temp - 750) / 10;
-    v_temp += 10; // additional offset from test measurement..
+    
 
     if(v_temp > 0)
-    {
         MS.MotorTemperatureData.q31_temperature_degrees = v_temp;
-    }
     else
-    {
         MS.MotorTemperatureData.q31_temperature_degrees = 0;
-    }
 #endif
 }
 
@@ -1425,8 +1426,10 @@ static void debug_comm(void)
         case 0:
 #ifndef BLUETOOTH_SERIALIZE_DISPLAY
             {
-                // plot anything here
-                //sprintf_(buffer, "%u %u T: %u  U: %u\n", MS.ui32_motor_error_state, ui8_six_step_hall_count, (uint16_t)MS.ChipTemperatureData.q31_temperature_degrees, (uint16_t)(MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+                // system state
+                sprintf_(buffer, "boost: %u\nerr: %lu\nhall: %u\ntemp: %u\n batt:%u\n\n",
+                ui16_boost_counter, MS.ui32_motor_error_state, MS.enum_hall_angle_state, 
+                MS.ChipTemperatureData.enum_temperature_state, MS.BatteryVoltageData.enum_voltage_state);
 
                 // KV
                 //uint32_t ui32_KV = ((ui16_timertics * MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10) >> 11) * MS.u_q;
@@ -1435,7 +1438,7 @@ static void debug_comm(void)
                 //sprintf_(buffer, "kv: %lu | max v: %u\n", ui32_KV, max_kmh / 10);
 
                 // motor temperature
-                sprintf_(buffer, "adcdata[1] = %u %ld\n", adcData[1], MS.MotorTemperatureData.q31_temperature_degrees);
+                //sprintf_(buffer, "adcdata[1] = %u %ld\n", adcData[1], MS.MotorTemperatureData.q31_temperature_degrees);
 
                 //sprintf_(buffer, "%lu, %u\n", MS.ui32_motor_error_state, ui8_motor_error_state_hall_count);
                 //
@@ -1468,7 +1471,7 @@ static void debug_comm(void)
 #ifdef BLUETOOTH_SERIALIZE_DISPLAY
             sprintf_(buffer, "Graph:%u|%u$", (uint16_t)MS.ChipTemperatureData.q31_temperature_degrees, (uint16_t)(MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
 #else
-            sprintf_(buffer, "T: %u | U: %u\n", (uint16_t)MS.ChipTemperatureData.q31_temperature_degrees, (uint16_t)(MS.BatteryVoltageData.q31_battery_voltage_V_x10 / 10));
+            sprintf_(buffer, "T chip: %u | T motor: %u | U: %u\n", (uint16_t)MS.ChipTemperatureData.q31_temperature_degrees, (uint16_t) MS.MotorTemperatureData.q31_temperature_degrees, (uint16_t)(MS.BatteryVoltageData.q31_battery_voltage_V_x10));
 #endif
             break;
         case 3:
@@ -2604,28 +2607,24 @@ static void i_q_control()
         u_q_temp = PI_control(&PI_iq);
 
 
-        //if( (uint32_tics_filtered >> 3) > SIXSTEPTHRESHOLD_DOWN && ui16_motor_init_state_timeout == 0 && MS.u_q < 300)
         if( (uint32_tics_filtered >> 3) > SIXSTEPTHRESHOLD_DOWN && ui16_motor_init_state_timeout == 0 )
+        //if( (uint32_tics_filtered >> 3) > SIXSTEPTHRESHOLD_DOWN && ui16_motor_init_state_timeout == 0 && MS.u_q < 300)
         {
             //i_q_control_state = 2;
             i_q_control_state = 0;
         }
-
-        //u_q_temp = u_q_target;
     }
 
     /*if(i_q_control_state == 2)
     {
         // ramp down -> no noise
-        for(uint8_t i = 0; i < 2; ++i)
+        if( MS.u_q > 1)
         {
-            if(MS.u_q > 0)
-            {
-                --MS.u_q;
-            }
+            u_q_temp = MS.u_q - 1;
         }
-        if(MS.u_q == 0)
+        else
         {
+            u_q_temp = 0;
             i_q_control_state = 0;
         }
     }*/

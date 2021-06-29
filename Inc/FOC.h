@@ -22,9 +22,7 @@ q31_t PI_control (PI_control_t* PI_c);
 #ifdef DISABLE_DYNAMIC_ADC
 #define _U_MAX	2000L  //little lower than period of timer1 for proper phase current reading. Could be improved by dynamic timing of AD-conversion
 #else
-//#define _U_MAX	2000L
-#define _U_MAX	2000L   // benno: reduced for testing -> increase again later
-//#define _U_MAX	600L   // benno: reduced for testing -> increase again later
+#define _U_MAX	2000L   // 
 #endif
 
 
